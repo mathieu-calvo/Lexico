@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lexico"
+version = "0.1.0"
+description = "Multilingual dictionary and spaced-repetition vocabulary companion"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.30",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "plotly>=5.0",
+    "rapidfuzz>=3.0",
+    "pyyaml>=6.0",
+    "streamlit-authenticator>=0.3",
+    "psycopg2-binary>=2.9",
+    "groq>=0.11",
+    "anthropic>=0.39",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lexico"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests that hit external APIs (deselect with '-m \"not slow\"')",
+]
