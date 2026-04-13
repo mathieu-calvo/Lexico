@@ -11,109 +11,119 @@ from lexico.domain.enums import Language
 from lexico.providers.base import LookupError
 from lexico.providers.wiktionary_native_provider import (
     WiktionaryNativeProvider,
-    _clean_wikitext,
-    _extract_etymology,
+    _extract_etymology_from_html,
     _extract_glosses,
-    _find_section,
+    _find_section_index,
+    _strip_tags,
 )
 
 
-FR_CHAT_WIKITEXT = """== {{langue|fr}} ==
-=== {{S|étymologie}} ===
-: Du latin {{lang|la|cattus}}, « chat domestique ».
-
-=== {{S|nom|fr}} ===
-# [[mammifère|Mammifère]] carnivore de la famille des [[félidés]], couramment élevé comme animal de compagnie.
-#* ''Le chat dort sur le canapé.''
-# {{familier|fr}} Personne rusée.
+FR_CHAT_HTML = """
+<h3><span class="mw-headline">Étymologie</span></h3>
+<p>Du latin <i>cattus</i>, emprunt probable à une langue africaine.</p>
+<h3><span class="mw-headline">Nom commun</span></h3>
+<ol>
+  <li>Mammifère carnivore félin de taille moyenne, au museau court, domestiqué comme animal de compagnie.
+    <ul><li>Le chat dort sur le canapé.</li></ul>
+  </li>
+  <li>(Familier) Personne rusée.</li>
+</ol>
 """
 
-IT_GATTO_WIKITEXT = """== {{-it-}} ==
-=== {{-etim-}} ===
-Dal latino ''cattus''.
-
-=== {{-noun-}} ===
-# piccolo [[mammifero]] carnivoro domestico della famiglia dei [[felidi]]
-#: ''Il gatto dorme sul divano.''
-# persona furba
+ES_HOLA_HTML = """
+<h3><span class="mw-headline">Etimología</span></h3>
+<p>De origen incierto, atestiguado desde el castellano medieval.</p>
+<h4><span class="mw-headline">Interjección</span></h4>
+<dl>
+  <dt>1</dt>
+  <dd>Expresión de saludo utilizada entre dos o más personas de trato familiar.
+    <ul><li>Sinónimo: buenas.</li></ul>
+  </dd>
+  <dt>2</dt>
+  <dd>Expresión de sorpresa.</dd>
+</dl>
 """
 
-ES_HOLA_WIKITEXT = """== {{lengua|es}} ==
-=== Etimología ===
-Origen incierto, atestiguado desde el español medieval.
-
-=== {{interjección}} ===
-# [[saludo|Saludo]] informal usado al encontrarse con alguien.
+IT_GATTO_HTML = """
+<h3>Etimologia</h3>
+<p>Dal latino tardo <i>cattus</i>.</p>
+<ol>
+  <li>Piccolo mammifero domestico della famiglia dei felidi.</li>
+  <li>Macchina da assedio usata nel medioevo.</li>
+</ol>
 """
 
 
-def test_clean_wikitext_strips_templates_and_links():
-    raw = "Du {{lang|la|cattus}}, « [[chat|chat]] [[domestique]] »."
-    assert _clean_wikitext(raw) == "Du , « chat domestique »."
+def test_strip_tags_removes_markup_and_entities():
+    assert _strip_tags("<b>Bold</b> &amp; <i>italic</i>") == "Bold & italic"
 
 
-def test_clean_wikitext_handles_bold_italic_and_refs():
-    raw = "'''Bold''' and ''italic'' with <ref>source</ref> trailing."
-    assert _clean_wikitext(raw) == "Bold and italic with trailing."
-
-
-def test_extract_glosses_skips_examples_and_sublines():
-    glosses = _extract_glosses(FR_CHAT_WIKITEXT)
+def test_extract_glosses_from_ol():
+    glosses = _extract_glosses(FR_CHAT_HTML)
     assert len(glosses) == 2
-    assert "Mammifère carnivore" in glosses[0]
+    assert "Mammifère" in glosses[0]
     assert "Personne rusée" in glosses[1]
+    # Nested <ul> example is stripped, not concatenated
+    assert "canapé" not in glosses[0]
 
 
-def test_extract_glosses_italian():
-    glosses = _extract_glosses(IT_GATTO_WIKITEXT)
+def test_extract_glosses_from_dl_fallback():
+    glosses = _extract_glosses(ES_HOLA_HTML)
+    assert len(glosses) == 2
+    assert "saludo" in glosses[0].lower()
+    assert "sorpresa" in glosses[1].lower()
+    # Nested <ul> synonym is stripped
+    assert "buenas" not in glosses[0]
+
+
+def test_extract_glosses_italian_ol():
+    glosses = _extract_glosses(IT_GATTO_HTML)
     assert any("mammifero" in g.lower() for g in glosses)
-    assert not any("dorme sul" in g for g in glosses)  # example is skipped
 
 
 def test_extract_etymology_french():
-    ety = _extract_etymology(FR_CHAT_WIKITEXT, ("Étymologie",))
+    ety = _extract_etymology_from_html(FR_CHAT_HTML)
     assert ety is not None
     assert "latin" in ety.lower()
 
 
-def test_extract_etymology_spanish():
-    ety = _extract_etymology(ES_HOLA_WIKITEXT, ("Etimología",))
+def test_extract_etymology_italian():
+    ety = _extract_etymology_from_html(IT_GATTO_HTML)
     assert ety is not None
-    assert "medieval" in ety.lower()
+    assert "latino" in ety.lower()
 
 
-def test_find_section_matches_native_header():
+def test_find_section_index_strips_span_wrappers():
     sections = [
-        {"line": "Anglais", "number": "1"},
-        {"line": "Français", "number": "2"},
+        {"line": "Anglais", "number": "1", "index": "1"},
+        {"line": "<span>Français</span>", "number": "2", "index": "5"},
     ]
-    assert _find_section(sections, "Français") == "2"
-    assert _find_section(sections, "Italiano") is None
+    assert _find_section_index(sections, "Français") == "5"
+    assert _find_section_index(sections, "Italiano") is None
 
 
 def test_lookup_end_to_end_mocked(monkeypatch):
     provider = WiktionaryNativeProvider()
 
     def fake_sections(self, lemma, language):
-        assert language == Language.FR
-        return [{"line": "Français", "number": "3"}]
+        return [{"line": "<span>Français</span>", "number": "1", "index": "3"}]
 
-    def fake_wikitext(self, lemma, language, section):
+    def fake_html(self, lemma, language, section):
         assert section == "3"
-        return FR_CHAT_WIKITEXT
+        return FR_CHAT_HTML
 
     monkeypatch.setattr(
         WiktionaryNativeProvider, "_fetch_sections", fake_sections
     )
     monkeypatch.setattr(
-        WiktionaryNativeProvider, "_fetch_wikitext", fake_wikitext
+        WiktionaryNativeProvider, "_fetch_section_html", fake_html
     )
 
     entry = provider.lookup("chat", Language.FR)
     assert entry.lemma == "chat"
     assert entry.language == Language.FR
     assert entry.source == "wiktionary-native"
-    assert len(entry.senses) >= 1
+    assert len(entry.senses) == 2
     assert "Mammifère" in entry.senses[0].gloss
     assert entry.etymology is not None
     assert "latin" in entry.etymology.lower()
@@ -135,7 +145,7 @@ def test_lookup_raises_when_native_section_missing(monkeypatch):
     monkeypatch.setattr(
         WiktionaryNativeProvider,
         "_fetch_sections",
-        lambda self, lemma, language: [{"line": "Anglais", "number": "1"}],
+        lambda self, lemma, language: [{"line": "Anglais", "index": "1"}],
     )
     with pytest.raises(LookupError, match="section"):
         provider.lookup("chat", Language.FR)
@@ -146,12 +156,12 @@ def test_lookup_raises_when_no_glosses(monkeypatch):
     monkeypatch.setattr(
         WiktionaryNativeProvider,
         "_fetch_sections",
-        lambda self, lemma, language: [{"line": "Français", "number": "1"}],
+        lambda self, lemma, language: [{"line": "Français", "index": "1"}],
     )
     monkeypatch.setattr(
         WiktionaryNativeProvider,
-        "_fetch_wikitext",
-        lambda self, lemma, language, section: "== header ==\nno definitions here\n",
+        "_fetch_section_html",
+        lambda self, lemma, language, section: "<h3>Nothing here</h3><p>empty</p>",
     )
     with pytest.raises(LookupError, match="definitions"):
         provider.lookup("chat", Language.FR)

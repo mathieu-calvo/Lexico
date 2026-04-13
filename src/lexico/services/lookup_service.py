@@ -35,7 +35,8 @@ class LookupService:
         self._sqlite = SQLiteCache(db_path)
 
     def _cache_key(self, lemma: str, language: Language) -> str:
-        return f"dict:{language.value}:{lemma.lower()}"
+        # v2 prefix invalidates pre-immersion English-glossed cache entries.
+        return f"dict:v2:{language.value}:{lemma.lower()}"
 
     def lookup(self, lemma: str, language: Language) -> WordEntry:
         key = self._cache_key(lemma, language)
