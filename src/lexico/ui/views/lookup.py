@@ -31,10 +31,7 @@ def render(user_id: str) -> None:
     lookup = get_lookup_service()
     available = _available_lemmas(lookup, language)
     if available:
-        st.caption(
-            f"**Stub dictionary active** — {len(available)} canned words in "
-            f"{language.display_name}. Click to try one:"
-        )
+        st.caption(f"Quick picks in {language.display_name}:")
         cols = st.columns(min(len(available), 6))
         for col, lemma in zip(cols, available):
             if col.button(lemma, key=f"pick_{language.value}_{lemma}"):
@@ -45,12 +42,12 @@ def render(user_id: str) -> None:
         return
 
     try:
-        entry = lookup.lookup(query.strip(), language)
+        with st.spinner(f"Looking up **{query}** in {language.display_name}…"):
+            entry = lookup.lookup(query.strip(), language)
     except LookupError:
         st.warning(
             f"No entry found for **{query}** in {language.display_name}. "
-            "The stub dictionary only has a handful of words per language — "
-            "KaikkiProvider (full Wiktionary) is on the roadmap."
+            "Check the spelling, or try a different language."
         )
         return
 

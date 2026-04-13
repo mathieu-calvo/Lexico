@@ -22,6 +22,13 @@ def get_lookup_service() -> "LookupService":
         if name == "stub":
             from lexico.providers.stub_provider import StubDictionaryProvider
             providers.append(StubDictionaryProvider())
+        elif name == "wiktionary":
+            try:
+                from lexico.providers.wiktionary_provider import WiktionaryProvider
+
+                providers.append(WiktionaryProvider())
+            except Exception:
+                pass
         elif name == "kaikki":
             try:
                 from lexico.providers.kaikki_provider import KaikkiProvider

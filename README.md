@@ -90,7 +90,7 @@ Look up a word → save it into a deck as a card → review it → rate your rec
 
 Lexico is designed to run at **zero dollars per month** by default.
 
-- **Dictionary content** comes from **[Kaikki.org](https://kaikki.org/)** — pre-parsed Wiktionary dumps shipped as structured data, free, offline, redistributable under CC-BY-SA. One download per language, then every lookup is an in-memory read. No API, no rate limits, no ongoing cost.
+- **Dictionary content** comes from **Wiktionary** via the free MediaWiki REST API (`en.wiktionary.org/api/rest_v1/page/definition/{word}`). No API key, no bulk download, no rate-limit anxiety for single-user traffic. Every lookup response is cached indefinitely in SQLite, so each word is fetched from the network exactly once per user.
 - **LLM enrichment** (cloze sentences, multiple-choice distractors, daily-challenge grading, tutor chat) uses **[Groq](https://console.groq.com/)**'s free tier — Llama 3.3 70B, ~14 400 requests/day at time of writing. Zero dollars per call. Only used when you actually open a feature that needs it; the core dictionary + review loop never calls an LLM.
 
 ### Cost caps
@@ -116,22 +116,17 @@ pip install -e ".[dev]"
 streamlit run src/lexico/ui/app.py
 ```
 
-The app runs immediately with zero setup. The default provider chain falls back to a built-in **stub dictionary** — ~25 hand-curated demo words across all 5 languages — so every page (home, lookup, decks, review modes, challenge, tutor, stats) is fully clickable before you download anything.
+The app runs immediately with zero setup. The default provider chain is `stub,wiktionary,groq`:
 
-To enable the full Wiktionary dictionary once the Kaikki loader lands:
-
-```bash
-export LEXICO_PROVIDER_ORDER=stub,kaikki
-streamlit run src/lexico/ui/app.py
-```
+1. **stub** — a built-in offline dictionary with ~25 hand-curated demo words across all 5 languages, rich with IPA / etymology / translations. Always tried first, so demo words feel polished.
+2. **wiktionary** — the live MediaWiki REST API. Handles every other word; results are cached indefinitely in local SQLite.
+3. **groq** — Llama 3.3 70B for the LLM enrichment features (only used when an API key is set).
 
 To enable tutor / cloze / challenge features with a real LLM, grab a free Groq API key at [console.groq.com](https://console.groq.com) and add it to `.streamlit/secrets.toml`:
 
 ```toml
 GROQ_API_KEY = "gsk_..."
 ```
-
-Then set `LEXICO_PROVIDER_ORDER=stub,kaikki,groq`.
 
 ---
 
@@ -141,7 +136,7 @@ All settings use the `LEXICO_` prefix and can be set via environment variables o
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `LEXICO_PROVIDER_ORDER` | `stub,kaikki,groq` | Provider fallback chain (dictionary + LLM) |
+| `LEXICO_PROVIDER_ORDER` | `stub,wiktionary,groq` | Provider fallback chain (dictionary + LLM) |
 | `LEXICO_MAX_LLM_CALLS_PER_USER_PER_DAY` | `50` | Per-user daily LLM call cap |
 | `LEXICO_MAX_LLM_CALLS_PER_DAY` | `500` | Global daily LLM call cap |
 | `LEXICO_DAILY_USD_CAP` | `0.00` | Global daily USD spend cap (paid LLMs off by default) |
@@ -156,8 +151,9 @@ All settings use the `LEXICO_` prefix and can be set via environment variables o
 src/lexico/
 ├── domain/          frozen Pydantic models (WordEntry, Deck, Card, FSRSState, Rating)
 ├── providers/       DictionaryProvider + LlmProvider Protocols + implementations
+│                    (stub, wiktionary REST API, groq, claude — paid off by default)
 ├── cache/           memory LRU + SQLite blob two-tier cache
-├── data/            Kaikki loader + themed seed decks
+├── data/            themed seed decks
 ├── services/        LookupService, EnrichmentService, UsageGuardrail,
 │                    ReviewScheduler, DeckStore, Gamification
 ├── ui/              Streamlit router, auth, components, views
