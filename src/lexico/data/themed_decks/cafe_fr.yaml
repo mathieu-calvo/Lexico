@@ -1,6 +1,5 @@
 name: Café French
 source_lang: fr
-target_lang: en
 description: Words for ordering, sitting, and paying at a French café.
 lemmas:
   - café

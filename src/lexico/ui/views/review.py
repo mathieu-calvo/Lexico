@@ -1,4 +1,9 @@
-"""Review view: FSRS queue with show/cloze/typing/MC modes."""
+"""Review view: FSRS queue with Reveal / Cloze / Recall / Match modes.
+
+Source-only, immersion-first. The user never has to read English (or any
+pivot) to review a word — definitions and prompts stay in the card's own
+language.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,8 @@ import streamlit as st
 from rapidfuzz.distance import Levenshtein
 
 from lexico.domain.deck import Card
-from lexico.domain.enums import Language, Rating
+from lexico.domain.enums import Language
+from lexico.providers.stub_provider import _STUB_ENTRIES
 from lexico.services import get_deck_store, get_enrichment_service
 from lexico.services.review_scheduler import schedule
 from lexico.services.usage_guardrail import BudgetExceeded
@@ -16,7 +22,7 @@ from lexico.ui.components.rating_widget import rating_buttons
 from lexico.ui.components.word_card import render_word_card
 
 
-_MODES = ["Show", "Cloze", "Typing", "Multiple choice"]
+_MODES = ["Reveal", "Cloze", "Recall", "Match"]
 
 
 def render(user_id: str) -> None:
@@ -43,17 +49,16 @@ def render(user_id: str) -> None:
         st.warning("Card belongs to a missing deck.")
         return
 
-    st.markdown(f"_{deck.source_lang.flag}→{deck.target_lang.flag} {deck.name}_")
-    target_lang = deck.target_lang
+    st.markdown(f"_{deck.source_lang.flag} {deck.name}_")
 
-    if mode == "Show":
-        _render_show(card)
+    if mode == "Reveal":
+        _render_reveal(card)
     elif mode == "Cloze":
         _render_cloze(card, enrichment)
-    elif mode == "Typing":
-        _render_typing(card, target_lang)
-    elif mode == "Multiple choice":
-        _render_mc(card, target_lang, enrichment)
+    elif mode == "Recall":
+        _render_recall(card)
+    elif mode == "Match":
+        _render_match(card, deck.id, store)
 
     st.divider()
     rating = rating_buttons(key_prefix=f"rate_{card.id}")
@@ -66,7 +71,7 @@ def render(user_id: str) -> None:
         st.rerun()
 
 
-def _render_show(card: Card) -> None:
+def _render_reveal(card: Card) -> None:
     with st.container(border=True):
         st.markdown(f"### {card.entry.lemma}")
         if not st.toggle("Reveal", key=f"reveal_{card.id}"):
@@ -81,60 +86,101 @@ def _render_cloze(card: Card, enrichment) -> None:
         try:
             st.session_state[cache_key] = enrichment.cloze(card.entry, user_id="local")
         except BudgetExceeded:
-            st.warning("Daily LLM budget reached — try **Show** or **Typing** mode.")
+            st.warning("Daily LLM budget reached — try **Reveal** or **Recall** mode.")
             return
         except Exception as exc:
             st.error(f"Cloze generation failed: {exc}")
             return
     cloze = st.session_state[cache_key]
     with st.container(border=True):
-        st.markdown(f"#### Fill in the blank")
+        st.markdown("#### Fill in the blank")
         st.markdown(f"> {cloze.sentence}")
         if st.toggle("Reveal answer", key=f"cloze_reveal_{card.id}"):
             st.success(f"**{cloze.answer}**")
 
 
-def _render_typing(card: Card, target_lang: Language) -> None:
-    correct = card.entry.primary_translation(target_lang) or card.entry.lemma
+def _render_recall(card: Card) -> None:
+    """Definition shown in the card's own language; type the lemma back."""
+    first_sense = card.entry.senses[0].gloss if card.entry.senses else ""
     with st.container(border=True):
-        st.markdown(f"### {card.entry.lemma}")
-        st.caption(f"Type the {target_lang.display_name} translation:")
-        guess = st.text_input("Your answer", key=f"typing_{card.id}")
+        st.caption(f"{card.entry.language.display_name} — type the word for:")
+        st.markdown(f"> {first_sense}")
+        guess = st.text_input("Your answer", key=f"recall_{card.id}")
         if guess:
-            distance = Levenshtein.distance(guess.strip().lower(), correct.lower())
+            distance = Levenshtein.distance(
+                guess.strip().lower(), card.entry.lemma.lower()
+            )
             if distance == 0:
-                st.success(f"✅ Exact: **{correct}**")
+                st.success(f"✅ Exact: **{card.entry.lemma}**")
             elif distance <= 2:
-                st.info(f"🟡 Close — exact form: **{correct}**")
+                st.info(f"🟡 Close — exact form: **{card.entry.lemma}**")
             else:
-                st.error(f"❌ Correct answer: **{correct}**")
+                st.error(f"❌ Correct answer: **{card.entry.lemma}**")
 
 
-def _render_mc(card: Card, target_lang: Language, enrichment) -> None:
-    correct = card.entry.primary_translation(target_lang) or card.entry.lemma
-    cache_key = f"mc_{card.id}"
+def _render_match(card: Card, deck_id: int | None, store) -> None:
+    """Pick the correct source-language definition from four options.
+
+    Distractors come from other cards in the same deck, falling back to
+    stub entries in the same language. No LLM call needed.
+    """
+    correct = card.entry.senses[0].gloss if card.entry.senses else card.entry.lemma
+    cache_key = f"match_{card.id}"
     if cache_key not in st.session_state:
-        try:
-            mc = enrichment.multiple_choice(card.entry, target_lang, correct, user_id="local")
-            st.session_state[cache_key] = mc
-        except BudgetExceeded:
-            st.warning("Daily LLM budget reached — try **Show** or **Typing** mode.")
+        distractors = _match_distractors(card, deck_id, store)
+        if len(distractors) < 3:
+            st.warning(
+                "Match needs at least 4 cards of the same language. "
+                "Add more words to this deck, or use **Reveal** mode."
+            )
             return
-        except Exception as exc:
-            st.error(f"MC generation failed: {exc}")
-            return
-    mc = st.session_state[cache_key]
+        rng = random.Random(hash((card.id, card.entry.lemma)))
+        options = rng.sample(distractors, 3) + [correct]
+        rng.shuffle(options)
+        st.session_state[cache_key] = {"correct": correct, "options": options}
+
+    payload = st.session_state[cache_key]
     with st.container(border=True):
         st.markdown(f"### {card.entry.lemma}")
-        st.caption(f"Pick the {target_lang.display_name} translation:")
+        st.caption(f"Pick the correct {card.entry.language.display_name} definition:")
         choice = st.radio(
             "Choices",
-            mc.all_options,
-            key=f"mc_choice_{card.id}",
+            payload["options"],
+            key=f"match_choice_{card.id}",
             label_visibility="collapsed",
         )
-        if st.button("Check", key=f"mc_check_{card.id}"):
-            if choice == mc.correct:
-                st.success(f"✅ Correct: **{mc.correct}**")
+        if st.button("Check", key=f"match_check_{card.id}"):
+            if choice == payload["correct"]:
+                st.success("✅ Correct!")
             else:
-                st.error(f"❌ Correct answer: **{mc.correct}**")
+                st.error(f"❌ Correct answer: _{payload['correct']}_")
+
+
+def _match_distractors(card: Card, deck_id: int | None, store) -> list[str]:
+    language = card.entry.language
+    lemma = card.entry.lemma
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _take(gloss: str) -> None:
+        if gloss and gloss not in seen:
+            out.append(gloss)
+            seen.add(gloss)
+
+    if deck_id is not None:
+        for other in store.list_cards(deck_id):
+            if other.entry.lemma == lemma or other.entry.language != language:
+                continue
+            if other.entry.senses:
+                _take(other.entry.senses[0].gloss)
+
+    if len(out) < 3:
+        for stub in _STUB_ENTRIES:
+            if stub.language != language or stub.lemma == lemma:
+                continue
+            if stub.senses:
+                _take(stub.senses[0].gloss)
+            if len(out) >= 8:
+                break
+
+    return out

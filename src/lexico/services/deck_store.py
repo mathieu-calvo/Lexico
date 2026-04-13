@@ -23,7 +23,6 @@ _SCHEMA = [
         user_id TEXT NOT NULL DEFAULT 'local',
         name TEXT NOT NULL,
         source_lang TEXT NOT NULL,
-        target_lang TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         UNIQUE(user_id, name)
@@ -82,20 +81,25 @@ class DeckStore:
             for stmt in _SCHEMA:
                 self._conn.execute(stmt)
             self._conn.commit()
+            # One-shot migration for dev DBs created before target_lang was dropped.
+            try:
+                self._conn.execute("ALTER TABLE decks DROP COLUMN target_lang")
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass
 
     # ---------- decks ----------
 
     def create_deck(self, deck: Deck) -> Deck:
         with self._lock:
             cursor = self._conn.execute(
-                """INSERT INTO decks (user_id, name, source_lang, target_lang, description, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)
+                """INSERT INTO decks (user_id, name, source_lang, description, created_at)
+                   VALUES (?, ?, ?, ?, ?)
                    ON CONFLICT(user_id, name) DO UPDATE SET description = excluded.description""",
                 (
                     deck.user_id,
                     deck.name,
                     deck.source_lang.value,
-                    deck.target_lang.value,
                     deck.description,
                     deck.created_at.isoformat(),
                 ),
@@ -115,7 +119,7 @@ class DeckStore:
     def list_decks(self, user_id: str = "local") -> list[Deck]:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT id, user_id, name, source_lang, target_lang, description, created_at
+                """SELECT id, user_id, name, source_lang, description, created_at
                    FROM decks WHERE user_id = ? ORDER BY created_at""",
                 (user_id,),
             ).fetchall()
@@ -125,9 +129,8 @@ class DeckStore:
                 user_id=row[1],
                 name=row[2],
                 source_lang=Language(row[3]),
-                target_lang=Language(row[4]),
-                description=row[5],
-                created_at=datetime.fromisoformat(row[6]),
+                description=row[4],
+                created_at=datetime.fromisoformat(row[5]),
             )
             for row in rows
         ]

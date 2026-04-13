@@ -69,10 +69,9 @@ def render(user_id: str) -> None:
     else:
         with st.expander("Or create a new deck"):
             name = st.text_input("Deck name", key="lookup_new_deck_name")
-            target = language_picker("Target language", key="lookup_new_target", default=Language.EN)
             if st.button("Create deck", key="lookup_new_deck_btn") and name:
                 new_deck = store.create_deck(
-                    Deck(user_id=user_id, name=name, source_lang=language, target_lang=target)
+                    Deck(user_id=user_id, name=name, source_lang=language)
                 )
                 if new_deck.id:
                     store.add_card(Card.new(entry, deck_id=new_deck.id))

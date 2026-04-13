@@ -14,6 +14,6 @@ def deck_picker(decks: list[Deck], key: str, label: str = "Deck") -> Deck | None
     return st.selectbox(
         label,
         decks,
-        format_func=lambda d: f"{d.source_lang.flag}→{d.target_lang.flag} {d.name}",
+        format_func=lambda d: f"{d.source_lang.flag} {d.name}",
         key=key,
     )

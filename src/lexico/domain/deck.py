@@ -46,7 +46,6 @@ class Deck(BaseModel):
     user_id: str = "local"
     name: str
     source_lang: Language
-    target_lang: Language
     description: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
 

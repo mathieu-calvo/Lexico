@@ -33,7 +33,6 @@ def sample_deck() -> Deck:
         user_id="local",
         name="Test French",
         source_lang=Language.FR,
-        target_lang=Language.EN,
     )
 
 

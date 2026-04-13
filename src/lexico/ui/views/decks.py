@@ -29,8 +29,8 @@ def render(user_id: str) -> None:
                 col_info, col_btn = st.columns([4, 1])
                 with col_info:
                     st.markdown(
-                        f"**{seed.source_lang.flag}→{seed.target_lang.flag} "
-                        f"{seed.name}**  · {len(seed.lemmas)} words"
+                        f"**{seed.source_lang.flag} {seed.name}**  · "
+                        f"{len(seed.lemmas)} words"
                     )
                     if seed.description:
                         st.caption(seed.description)
@@ -49,11 +49,7 @@ def render(user_id: str) -> None:
 
     with st.expander("➕ New deck", expanded=not decks):
         name = st.text_input("Name", key="new_deck_name")
-        col_src, col_tgt = st.columns(2)
-        with col_src:
-            source = language_picker("Source", key="new_deck_src", default=Language.FR)
-        with col_tgt:
-            target = language_picker("Target", key="new_deck_tgt", default=Language.EN)
+        source = language_picker("Language", key="new_deck_src", default=Language.FR)
         description = st.text_area("Description (optional)", key="new_deck_desc")
         if st.button("Create deck", type="primary", key="new_deck_create") and name:
             store.create_deck(
@@ -61,7 +57,6 @@ def render(user_id: str) -> None:
                     user_id=user_id,
                     name=name,
                     source_lang=source,
-                    target_lang=target,
                     description=description,
                 )
             )
@@ -78,9 +73,7 @@ def render(user_id: str) -> None:
             cards = store.list_cards(deck.id) if deck.id else []
             head_col, btn_col = st.columns([4, 1])
             with head_col:
-                st.markdown(
-                    f"### {deck.source_lang.flag}→{deck.target_lang.flag} {deck.name}"
-                )
+                st.markdown(f"### {deck.source_lang.flag} {deck.name}")
                 if deck.description:
                     st.caption(deck.description)
                 st.write(f"**{len(cards)}** cards")
@@ -93,8 +86,9 @@ def render(user_id: str) -> None:
             if cards:
                 with st.expander(f"Show cards ({len(cards)})"):
                     for card in cards:
-                        translations = card.entry.primary_translation(deck.target_lang) or "—"
+                        first_sense = card.entry.senses[0].gloss if card.entry.senses else "—"
+                        preview = (first_sense[:80] + "…") if len(first_sense) > 80 else first_sense
                         st.markdown(
-                            f"- **{card.entry.lemma}** → {translations}"
+                            f"- **{card.entry.lemma}** — {preview}"
                             f"  · due {card.fsrs_state.due_at.date().isoformat()}"
                         )

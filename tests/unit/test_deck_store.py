@@ -18,24 +18,20 @@ def store(tmp_path):
 
 
 def test_create_deck_assigns_id(store):
-    deck = store.create_deck(
-        Deck(name="French Basics", source_lang=Language.FR, target_lang=Language.EN)
-    )
+    deck = store.create_deck(Deck(name="French Basics", source_lang=Language.FR))
     assert deck.id is not None
 
 
 def test_list_decks_returns_created(store):
-    store.create_deck(Deck(name="A", source_lang=Language.FR, target_lang=Language.EN))
-    store.create_deck(Deck(name="B", source_lang=Language.IT, target_lang=Language.EN))
+    store.create_deck(Deck(name="A", source_lang=Language.FR))
+    store.create_deck(Deck(name="B", source_lang=Language.IT))
     decks = store.list_decks()
     names = {d.name for d in decks}
     assert names == {"A", "B"}
 
 
 def test_delete_deck_cascades_cards(store, stub_dict):
-    deck = store.create_deck(
-        Deck(name="X", source_lang=Language.FR, target_lang=Language.EN)
-    )
+    deck = store.create_deck(Deck(name="X", source_lang=Language.FR))
     card = Card.new(entry=stub_dict.lookup("chat", Language.FR), deck_id=deck.id)
     store.add_card(card)
     store.delete_deck(deck.id)
@@ -44,9 +40,7 @@ def test_delete_deck_cascades_cards(store, stub_dict):
 
 
 def test_add_card_and_list(store, stub_dict):
-    deck = store.create_deck(
-        Deck(name="Y", source_lang=Language.FR, target_lang=Language.EN)
-    )
+    deck = store.create_deck(Deck(name="Y", source_lang=Language.FR))
     card = Card.new(entry=stub_dict.lookup("chat", Language.FR), deck_id=deck.id)
     saved = store.add_card(card)
     assert saved.id is not None
@@ -56,9 +50,7 @@ def test_add_card_and_list(store, stub_dict):
 
 
 def test_due_cards_respect_schedule(store, stub_dict, now):
-    deck = store.create_deck(
-        Deck(name="Z", source_lang=Language.FR, target_lang=Language.EN)
-    )
+    deck = store.create_deck(Deck(name="Z", source_lang=Language.FR))
     card = Card.new(entry=stub_dict.lookup("chat", Language.FR), deck_id=deck.id)
     saved = store.add_card(card)
 
@@ -71,9 +63,7 @@ def test_due_cards_respect_schedule(store, stub_dict, now):
 
 
 def test_log_review_and_list(store, stub_dict, now):
-    deck = store.create_deck(
-        Deck(name="R", source_lang=Language.FR, target_lang=Language.EN)
-    )
+    deck = store.create_deck(Deck(name="R", source_lang=Language.FR))
     card = Card.new(entry=stub_dict.lookup("chat", Language.FR), deck_id=deck.id)
     saved = store.add_card(card)
     _, log = schedule(saved.fsrs_state, Rating.GOOD, now)

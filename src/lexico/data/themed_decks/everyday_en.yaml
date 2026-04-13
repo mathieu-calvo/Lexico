@@ -1,6 +1,5 @@
 name: Everyday English
 source_lang: en
-target_lang: fr
 description: High-frequency English words worth cementing — a B1-level starter pack.
 lemmas:
   - hello

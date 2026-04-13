@@ -35,6 +35,23 @@ def test_stub_dict_has_at_least_5_entries_per_language(language):
     assert len(lemmas) >= 5
 
 
+def test_stub_glosses_are_native_language():
+    """Immersion-first: definitions live in the word's own language."""
+    provider = StubDictionaryProvider()
+
+    fr = provider.lookup("chat", Language.FR).senses[0].gloss
+    assert "mammifère" in fr.lower() or "félidés" in fr.lower()
+
+    it = provider.lookup("gatto", Language.IT).senses[0].gloss
+    assert "mammifero" in it.lower() or "felidi" in it.lower()
+
+    es = provider.lookup("gato", Language.ES).senses[0].gloss
+    assert "mamífero" in es.lower() or "félidos" in es.lower()
+
+    pt = provider.lookup("gato", Language.PT).senses[0].gloss
+    assert "mamífero" in pt.lower() or "felídeos" in pt.lower()
+
+
 @pytest.mark.parametrize("language", list(Language))
 def test_stub_dict_random_lemma_is_deterministic_per_day(language):
     provider = StubDictionaryProvider()

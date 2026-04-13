@@ -40,7 +40,6 @@ class Settings(BaseSettings):
 
     # UI
     default_source_lang: str = "fr"
-    default_target_lang: str = "en"
 
     model_config = {
         "env_prefix": "LEXICO_",

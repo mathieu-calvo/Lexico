@@ -1,6 +1,5 @@
 name: Italian cooking
 source_lang: it
-target_lang: en
 description: Kitchen and ingredient vocabulary for reading Italian recipes.
 lemmas:
   - pasta

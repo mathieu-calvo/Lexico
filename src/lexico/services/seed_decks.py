@@ -32,7 +32,6 @@ class SeedDeck:
     slug: str
     name: str
     source_lang: Language
-    target_lang: Language
     description: str
     lemmas: tuple[str, ...]
 
@@ -57,7 +56,6 @@ def _load_one(path: Path) -> SeedDeck:
         slug=path.stem,
         name=str(data["name"]),
         source_lang=Language(data["source_lang"]),
-        target_lang=Language(data["target_lang"]),
         description=str(data.get("description", "")),
         lemmas=tuple(str(l) for l in data.get("lemmas", [])),
     )
@@ -79,7 +77,6 @@ def clone_seed_deck(
             user_id=user_id,
             name=seed.name,
             source_lang=seed.source_lang,
-            target_lang=seed.target_lang,
             description=seed.description,
         )
     )
