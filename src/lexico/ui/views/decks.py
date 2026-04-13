@@ -6,7 +6,8 @@ import streamlit as st
 
 from lexico.domain.deck import Deck
 from lexico.domain.enums import Language
-from lexico.services import get_deck_store
+from lexico.services import get_deck_store, get_lookup_service
+from lexico.services.seed_decks import clone_seed_deck, list_seed_decks
 from lexico.ui.components.language_picker import language_picker
 
 
@@ -16,6 +17,35 @@ def render(user_id: str) -> None:
 
     store = get_deck_store()
     decks = store.list_decks(user_id=user_id)
+
+    seeds = list_seed_decks()
+    if seeds:
+        with st.expander("🌱 Clone a themed deck"):
+            st.caption(
+                "One click to start learning a curated topic. "
+                "Each word is looked up and added to a new deck."
+            )
+            for seed in seeds:
+                col_info, col_btn = st.columns([4, 1])
+                with col_info:
+                    st.markdown(
+                        f"**{seed.source_lang.flag}→{seed.target_lang.flag} "
+                        f"{seed.name}**  · {len(seed.lemmas)} words"
+                    )
+                    if seed.description:
+                        st.caption(seed.description)
+                with col_btn:
+                    if st.button("Clone", key=f"clone_{seed.slug}"):
+                        lookup = get_lookup_service()
+                        with st.spinner(f"Cloning *{seed.name}*…"):
+                            _, added, skipped = clone_seed_deck(
+                                seed, store, lookup, user_id=user_id
+                            )
+                        msg = f"Added {added} cards to **{seed.name}**."
+                        if skipped:
+                            msg += f" ({skipped} skipped)"
+                        st.success(msg)
+                        st.rerun()
 
     with st.expander("➕ New deck", expanded=not decks):
         name = st.text_input("Name", key="new_deck_name")

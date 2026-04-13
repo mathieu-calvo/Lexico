@@ -1,0 +1,20 @@
+name: Italian cooking
+source_lang: it
+target_lang: en
+description: Kitchen and ingredient vocabulary for reading Italian recipes.
+lemmas:
+  - pasta
+  - pomodoro
+  - aglio
+  - cipolla
+  - olio
+  - sale
+  - pepe
+  - formaggio
+  - pane
+  - vino
+  - forno
+  - padella
+  - cucchiaio
+  - coltello
+  - mescolare

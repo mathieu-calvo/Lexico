@@ -77,6 +77,7 @@ Look up a word → save it into a deck as a card → review it → rate your rec
 
 ## Features on top of the core loop
 
+- **Themed seed decks** — one-click clone of curated topic decks (*Café French*, *Italian cooking*, *Lisbon weekend*, *Spanish travel*, *Everyday English*). Each deck hydrates its cards by looking every lemma up through the normal provider chain.
 - **Word of the day** per language on the home dashboard (deterministic rotation so the same date gives the same word)
 - **Daily challenge** — use three of your due words in one sentence; a small LLM call grades it warmly
 - **Tutor chat** — free-form questions about a word, contrastive examples, register explanations

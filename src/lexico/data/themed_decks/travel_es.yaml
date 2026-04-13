@@ -1,0 +1,20 @@
+name: Spanish travel basics
+source_lang: es
+target_lang: en
+description: Essentials for navigating a Spanish-speaking country as a traveler.
+lemmas:
+  - hola
+  - gracias
+  - por favor
+  - hotel
+  - habitación
+  - agua
+  - comida
+  - baño
+  - estación
+  - tren
+  - autobús
+  - playa
+  - cuenta
+  - perdón
+  - ayuda

@@ -1,0 +1,20 @@
+name: Café French
+source_lang: fr
+target_lang: en
+description: Words for ordering, sitting, and paying at a French café.
+lemmas:
+  - café
+  - croissant
+  - addition
+  - serveur
+  - terrasse
+  - commander
+  - boisson
+  - sucre
+  - lait
+  - chocolat
+  - thé
+  - menu
+  - pourboire
+  - tasse
+  - soucoupe
