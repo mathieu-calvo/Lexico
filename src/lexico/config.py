@@ -12,8 +12,11 @@ class Settings(BaseSettings):
     prefix, or via a .env file in the project root.
     """
 
-    # Providers (dictionary first, then LLM chain)
-    provider_order: str = "stub,kaikki,groq,claude"
+    # Providers (dictionary first, then LLM chain).
+    # Paid providers (claude) are intentionally NOT in the default chain —
+    # Lexico runs at $0/month by default. Opt in by adding "claude" to the
+    # chain AND raising daily_usd_cap above 0.
+    provider_order: str = "stub,kaikki,groq"
     groq_api_key: str | None = None
     anthropic_api_key: str | None = None
     groq_model: str = "llama-3.3-70b-versatile"
@@ -25,10 +28,11 @@ class Settings(BaseSettings):
     cache_dir: Path = Path.home() / ".lexico"
     memory_cache_ttl_hours: int = 24
 
-    # Cost guardrails
+    # Cost guardrails. The USD cap defaults to 0.00 so no paid provider can
+    # ever spend money without an explicit opt-in by raising this value.
     max_llm_calls_per_user_per_day: int = 50
     max_llm_calls_per_day: int = 500
-    daily_usd_cap: float = 0.25
+    daily_usd_cap: float = 0.00
 
     # Cloud / auth
     database_url: str | None = None

@@ -46,3 +46,29 @@ def test_usd_cap_trips(guardrail):
     guardrail.record("alice", "claude", "haiku", 100, 200, 0.15)
     with pytest.raises(BudgetExceeded, match="spend cap"):
         guardrail.allow("alice")
+
+
+def test_zero_usd_cap_allows_free_calls(tmp_path):
+    """A $0 cap must not block free-tier calls (usd=0)."""
+    g = UsageGuardrail(
+        tmp_path / "lexico.db",
+        per_user_daily=100,
+        global_daily=100,
+        daily_usd_cap=0.00,
+    )
+    g.allow("alice")
+    g.record("alice", "groq", "llama-3.3", 50, 100, 0.0)
+    g.allow("alice")  # still fine — no money spent
+
+
+def test_zero_usd_cap_blocks_any_paid_call(tmp_path):
+    """A $0 cap trips as soon as a paid provider records any charge."""
+    g = UsageGuardrail(
+        tmp_path / "lexico.db",
+        per_user_daily=100,
+        global_daily=100,
+        daily_usd_cap=0.00,
+    )
+    g.record("alice", "claude", "haiku", 10, 20, 0.0001)
+    with pytest.raises(BudgetExceeded, match="spend cap"):
+        g.allow("alice")

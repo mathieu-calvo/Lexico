@@ -21,16 +21,37 @@ def render(user_id: str) -> None:
     with col_lang:
         language = language_picker("Language", key="lookup_lang", default=Language.FR)
     with col_query:
-        query = st.text_input("Word", key="lookup_query", placeholder="éphémère, chat, flâner …")
+        query = st.text_input(
+            "Word",
+            key="lookup_query",
+            placeholder="éphémère, chat, flâner …",
+            value=st.session_state.pop("lookup_prefill", ""),
+        )
+
+    lookup = get_lookup_service()
+    available = _available_lemmas(lookup, language)
+    if available:
+        st.caption(
+            f"**Stub dictionary active** — {len(available)} canned words in "
+            f"{language.display_name}. Click to try one:"
+        )
+        cols = st.columns(min(len(available), 6))
+        for col, lemma in zip(cols, available):
+            if col.button(lemma, key=f"pick_{language.value}_{lemma}"):
+                st.session_state["lookup_prefill"] = lemma
+                st.rerun()
 
     if not query:
         return
 
-    lookup = get_lookup_service()
     try:
         entry = lookup.lookup(query.strip(), language)
     except LookupError:
-        st.warning(f"No entry found for **{query}** in {language.display_name}.")
+        st.warning(
+            f"No entry found for **{query}** in {language.display_name}. "
+            "The stub dictionary only has a handful of words per language — "
+            "KaikkiProvider (full Wiktionary) is on the roadmap."
+        )
         return
 
     with st.container(border=True):
@@ -60,3 +81,15 @@ def render(user_id: str) -> None:
                     store.add_card(Card.new(entry, deck_id=new_deck.id))
                 st.success(f"Created **{name}** and added **{entry.lemma}**.")
                 st.rerun()
+
+
+def _available_lemmas(lookup, language: Language) -> list[str]:
+    for provider in lookup.providers:
+        if hasattr(provider, "all_lemmas"):
+            try:
+                lemmas = provider.all_lemmas(language)  # type: ignore[attr-defined]
+                if lemmas:
+                    return lemmas
+            except Exception:
+                continue
+    return []

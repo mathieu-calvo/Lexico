@@ -46,7 +46,9 @@ class UsageGuardrail:
             raise BudgetExceeded(
                 f"Global daily limit of {self._global_daily} LLM calls reached."
             )
-        if self._store.llm_usd_today() >= self._daily_usd_cap:
+        # Strict `>` so a cap of 0.00 doesn't trip on free calls (usd=0);
+        # it only trips once a paid provider has actually charged something.
+        if self._store.llm_usd_today() > self._daily_usd_cap:
             raise BudgetExceeded(
                 f"Global daily spend cap of ${self._daily_usd_cap:.2f} reached."
             )

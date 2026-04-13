@@ -23,9 +23,9 @@ def get_lookup_service() -> "LookupService":
             from lexico.providers.stub_provider import StubDictionaryProvider
             providers.append(StubDictionaryProvider())
         elif name == "kaikki":
-            from lexico.providers.kaikki_provider import KaikkiProvider
-
             try:
+                from lexico.providers.kaikki_provider import KaikkiProvider
+
                 providers.append(KaikkiProvider(settings.kaikki_dir))
             except Exception:
                 pass
