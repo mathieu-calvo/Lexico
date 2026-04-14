@@ -35,6 +35,7 @@ class WordEntry(BaseModel):
     ipa: str | None = None
     senses: tuple[Sense, ...] = ()
     translations: dict[Language, tuple[str, ...]] = Field(default_factory=dict)
+    derived: tuple[str, ...] = ()
     etymology: str | None = None
     cefr_level: CEFRLevel | None = None
     source: str = "stub"

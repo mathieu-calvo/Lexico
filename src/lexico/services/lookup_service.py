@@ -35,10 +35,32 @@ class LookupService:
         self._sqlite = SQLiteCache(db_path)
 
     def _cache_key(self, lemma: str, language: Language) -> str:
-        # v2 prefix invalidates pre-immersion English-glossed cache entries.
-        return f"dict:v2:{language.value}:{lemma.lower()}"
+        # v3 prefix invalidates caches that predate the richer Wiktionary parser
+        # (examples, derived forms, translations, IPA, POS).
+        return f"dict:v3:{language.value}:{lemma.lower()}"
+
+    def _normalize(self, lemma: str) -> str:
+        # Wiktionary pages are case-sensitive (fr/paris does not exist, fr/Paris
+        # does). We store cache keys lowercased for case-insensitive hits, and
+        # try multiple casings at the provider layer. Underscores become spaces
+        # (MediaWiki treats them interchangeably in page titles) and repeated
+        # whitespace collapses so "from  stem  to  stern" still resolves.
+        import re
+        cleaned = lemma.replace("_", " ").strip()
+        return re.sub(r"\s+", " ", cleaned)
+
+    def _casing_variants(self, lemma: str) -> list[str]:
+        seen: list[str] = []
+        for v in (lemma, lemma.lower(), lemma.capitalize()):
+            if v and v not in seen:
+                seen.append(v)
+        return seen
 
     def lookup(self, lemma: str, language: Language) -> WordEntry:
+        lemma = self._normalize(lemma)
+        if not lemma:
+            raise LookupError("Empty lemma")
+
         key = self._cache_key(lemma, language)
 
         hit = self._memory.get(key)
@@ -51,15 +73,17 @@ class LookupService:
             self._memory.put(key, entry.model_dump(mode="json"))
             return entry
 
+        variants = self._casing_variants(lemma)
         for provider in self._providers:
-            try:
-                entry = provider.lookup(lemma, language)
-            except LookupError:
-                continue
-            payload = entry.model_dump(mode="json")
-            self._sqlite.put(key, payload)
-            self._memory.put(key, payload)
-            return entry
+            for variant in variants:
+                try:
+                    entry = provider.lookup(variant, language)
+                except LookupError:
+                    continue
+                payload = entry.model_dump(mode="json")
+                self._sqlite.put(key, payload)
+                self._memory.put(key, payload)
+                return entry
 
         raise LookupError(f"No provider could find {lemma!r} in {language.value}")
 
