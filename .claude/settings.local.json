@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f src/lexico/data/expressions_data.json)",
+      "Bash(python scripts/fetch_expressions.py --target 30 --lang fr)"
+    ]
+  }
+}

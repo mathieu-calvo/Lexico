@@ -54,20 +54,30 @@ Hand-authored static content that isn't code and isn't user state:
 - `daily_pool` — word-of-the-day, expression-of-the-day, and quote-of-the-day
   pools per language. `home.py` indexes into these deterministically by date.
 
-**Source of the daily pool content.** Everything in `daily_pool.py` is a
-hand-authored Python literal that ships with the codebase. There is no
-static dump, no nightly cron, no web scrape, and no external API behind it.
-Reading `word_of_the_day(Language.FR)` is a pure in-memory array lookup —
-no filesystem, no network, no cache. This keeps the home view renderable
-even when Wiktionary is down, and lets us curate idioms and quotes (which
-would be hard to extract cleanly from a crawl) rather than derive them.
+**Source of the daily pool content.** Three different sources, one for
+each pool type:
 
-The one caveat: the **home view itself** takes the lemma from the static
-pool and then calls `LookupService.lookup(lemma, language)` to render a
-full word card, so the *definition* behind a word-of-the-day is fetched
-dynamically from the provider chain (usually Wiktionary) and cached
-indefinitely in SQLite. The lemma is static; its dictionary entry is
-dynamic and cached after the first fetch.
+- **Word-of-the-day lemmas** are hand-authored Python literals in
+  `daily_pool.py`. Small, curated list per language. The home view then
+  calls `LookupService.lookup(lemma, language)` to render a full word
+  card, so the lemma is static but the definition behind it is fetched
+  dynamically from Wiktionary (and cached in SQLite forever after the
+  first fetch).
+- **Quote-of-the-day** items are hand-authored Python literals in
+  `daily_pool.py`. Short aphorisms by well-known authors, pure
+  in-memory tuples.
+- **Expression-of-the-day** items are **harvested from Wiktionary** by
+  `scripts/fetch_expressions.py` (see below) and written to a shipped
+  JSON snapshot at `src/lexico/data/expressions_data.json`. The snapshot
+  is loaded once at import time by `_load_expression_pools` and exposed
+  as `EXPRESSION_POOLS`. If the snapshot file is missing (e.g. the script
+  has never been run), a small hand-authored fallback in
+  `_FALLBACK_EXPRESSIONS` keeps the home view working with a handful of
+  idioms per language.
+
+None of the three pools depends on a network call at runtime — the JSON
+snapshot is a build-time artifact that ships in the repo, and the lookup
+cache makes the WotD card-render a one-time network hit per install.
 
 **When the pools roll over.** The `_day_index` helper computes
 `(today.toordinal() + language_offset + salt) % pool_size` where `today`
@@ -82,9 +92,51 @@ defaults to `datetime.now(timezone.utc).date()`. Consequences:
   words, 10 expressions, 7 quotes per language) so each cycles on its
   own period.
 
-To refresh or extend a pool, edit the tuples in `daily_pool.py` directly
-and redeploy. There is no admin UI, no database table, and no migration —
-the pools are code.
+To refresh or extend a pool:
+
+- **Words and quotes** — edit the tuples in `daily_pool.py` directly and
+  redeploy. They're pure code, no tooling needed.
+- **Expressions** — re-run `python scripts/fetch_expressions.py` (see
+  below) to regenerate `expressions_data.json`, then commit the new
+  snapshot and redeploy. Pass `--lang <code>` to refresh a single
+  language, or `--target <n>` to change the cap.
+
+## scripts/fetch_expressions.py
+
+A one-shot build-time script that populates the expression pools. Not
+called at runtime; run it manually whenever you want to refresh the
+snapshot.
+
+The script:
+
+1. Queries each per-language Wiktionary's MediaWiki Action API for
+   idiom/locution categories. We pick per-language category names
+   carefully — each edition uses its own scheme (French has
+   `Catégorie:Locutions verbales en français` etc., Italian splits by
+   phrase type under `Categoria:Locuzioni …`, Spanish uses
+   `Categoría:ES:Locuciones …`, Portuguese uses
+   `Categoria:Locução … (Português)`). "Nominal" / "substantiva"
+   locution categories are deliberately skipped because they're
+   dominated by compound common nouns (species names, chemical
+   compounds) rather than real idioms.
+2. Paginates each category, filters out namespaced pages (`Annexe:`,
+   `Appendix:`), single-word entries, and numeric noise.
+3. Feeds every candidate title through the existing
+   `WiktionaryNativeProvider`, which already knows how to parse each
+   per-language edition's HTML into a `WordEntry` with native-language
+   glosses. The first sense's gloss becomes the expression's meaning.
+4. Writes `(text, meaning)` pairs to `src/lexico/data/expressions_data.json`
+   with a small `_meta` block naming Wiktionary + CC-BY-SA 3.0 as the
+   source.
+
+Roughly 1 lookup/sec end-to-end (Wiktionary HTTP + parse + a polite
+0.15s throttle), so a full 5-language × 400-per-language run takes
+~30–40 minutes. Re-running is idempotent — the existing snapshot is
+loaded and only the requested languages are overwritten.
+
+The daily-pool module loads the snapshot once at import time and falls
+back to a tiny hand-authored list if the file is missing, so the app
+is never broken by a failed or skipped fetch run.
 
 ### services/
 The orchestration layer. No Streamlit imports; each service is independently

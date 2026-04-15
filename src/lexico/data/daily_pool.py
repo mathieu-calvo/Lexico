@@ -1,17 +1,30 @@
-"""Curated daily pools: word-of-the-day, expression, and quote per language.
+"""Daily pools: word-of-the-day, expression, and quote per language.
 
-Lives in `data/` (not `providers/`) because these are hand-authored constants —
-not looked up, fetched, or generated. The home view pulls one item per pool per
-day, indexed deterministically by date so every user sees the same thing on the
-same day without needing a database.
+Two kinds of content live here:
+
+- **Word** and **quote** pools are hand-authored Python literals — small,
+  curated, and carefully picked so they always look good on the home page.
+- **Expression** pools are larger (hundreds per language) and are harvested
+  from Wiktionary by ``scripts/fetch_expressions.py``. The script writes a
+  snapshot to ``expressions_data.json`` next to this module, which is
+  loaded once at import time. If the snapshot is missing (e.g. the fetch
+  has never been run), a tiny hand-authored fallback keeps the home view
+  working so the app is never broken.
+
+The home view pulls one item per pool per day, indexed deterministically
+by date so every user sees the same thing on the same day without needing
+a database.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from pathlib import Path
 
-from lexico.domain.enums import Language
+from lexico.domain.enums import Language, PartOfSpeech
+from lexico.domain.word import Sense, WordEntry
 
 
 @dataclass(frozen=True)
@@ -62,69 +75,77 @@ WORD_POOLS: dict[Language, tuple[str, ...]] = {
 }
 
 
-# Expressions — idioms / turns of phrase with a short plain-language meaning.
-EXPRESSION_POOLS: dict[Language, tuple[DailyExpression, ...]] = {
+# Fallback expression pool used only if the Wiktionary-sourced JSON snapshot
+# is missing. Small and hand-authored — enough to keep the home view
+# rendering something reasonable while the fetch script hasn't been run.
+_FALLBACK_EXPRESSIONS: dict[Language, tuple[DailyExpression, ...]] = {
     Language.FR: (
         DailyExpression("coûter les yeux de la tête", "Être extrêmement cher."),
         DailyExpression("poser un lapin", "Ne pas venir à un rendez-vous."),
-        DailyExpression("avoir le cafard", "Être triste, déprimé."),
         DailyExpression("tomber dans les pommes", "S'évanouir."),
-        DailyExpression("appeler un chat un chat", "Dire les choses comme elles sont."),
-        DailyExpression("ne pas être dans son assiette", "Ne pas se sentir bien."),
-        DailyExpression("avoir un poil dans la main", "Être paresseux."),
         DailyExpression("jeter l'éponge", "Abandonner, renoncer."),
-        DailyExpression("prendre ses jambes à son cou", "S'enfuir rapidement."),
-        DailyExpression("faire la grasse matinée", "Dormir tard le matin."),
     ),
     Language.EN: (
-        DailyExpression("to bite the bullet", "To accept something difficult with courage."),
-        DailyExpression("under the weather", "Feeling unwell."),
-        DailyExpression("a piece of cake", "Something very easy."),
-        DailyExpression("spill the beans", "Reveal a secret."),
-        DailyExpression("hit the sack", "Go to bed."),
         DailyExpression("break the ice", "Start a conversation in an awkward moment."),
-        DailyExpression("cost an arm and a leg", "Be very expensive."),
-        DailyExpression("let the cat out of the bag", "Accidentally reveal a secret."),
-        DailyExpression("once in a blue moon", "Very rarely."),
+        DailyExpression("a piece of cake", "Something very easy."),
         DailyExpression("burn the midnight oil", "Work late into the night."),
+        DailyExpression("once in a blue moon", "Very rarely."),
     ),
     Language.IT: (
         DailyExpression("in bocca al lupo", "Formula per augurare buona fortuna."),
-        DailyExpression("non vedo l'ora", "Non riesco ad aspettare, sono impaziente."),
-        DailyExpression("avere le mani bucate", "Spendere troppi soldi, essere spendaccione."),
         DailyExpression("rompere il ghiaccio", "Iniziare una conversazione in un momento imbarazzante."),
         DailyExpression("essere al settimo cielo", "Essere felicissimo."),
-        DailyExpression("prendere due piccioni con una fava", "Ottenere due risultati con un'azione sola."),
-        DailyExpression("avere la testa fra le nuvole", "Essere distratto, sognatore."),
         DailyExpression("costare un occhio della testa", "Essere molto caro."),
-        DailyExpression("non tutte le ciambelle riescono col buco", "Non sempre le cose vanno come previsto."),
-        DailyExpression("chi dorme non piglia pesci", "Chi è pigro non ottiene risultati."),
     ),
     Language.ES: (
-        DailyExpression("estar en las nubes", "Estar distraído o soñando despierto."),
         DailyExpression("tomar el pelo", "Burlarse de alguien, engañarlo en broma."),
         DailyExpression("ser pan comido", "Ser muy fácil."),
-        DailyExpression("no tener pelos en la lengua", "Hablar con franqueza."),
         DailyExpression("costar un ojo de la cara", "Ser muy caro."),
         DailyExpression("meter la pata", "Cometer un error."),
-        DailyExpression("estar como una cabra", "Estar loco, ser excéntrico."),
-        DailyExpression("dar en el clavo", "Acertar exactamente."),
-        DailyExpression("ponerse las pilas", "Espabilarse, esforzarse."),
-        DailyExpression("a mal tiempo, buena cara", "Afrontar la adversidad con optimismo."),
     ),
     Language.PT: (
         DailyExpression("engolir sapos", "Tolerar coisas desagradáveis em silêncio."),
-        DailyExpression("ficar de molho", "Ficar de repouso, sobretudo por doença."),
         DailyExpression("pagar o pato", "Levar a culpa por algo que não fez."),
-        DailyExpression("dar com os burros n'água", "Fracassar numa tentativa."),
-        DailyExpression("descascar o abacaxi", "Resolver um problema difícil."),
-        DailyExpression("chutar o balde", "Perder a paciência e desistir."),
-        DailyExpression("quebrar o galho", "Dar um jeito provisório para ajudar."),
         DailyExpression("custar os olhos da cara", "Ser muito caro."),
-        DailyExpression("estar com a cabeça nas nuvens", "Estar distraído, sonhador."),
-        DailyExpression("não ver um palmo à frente do nariz", "Não perceber o óbvio."),
+        DailyExpression("quebrar o galho", "Dar um jeito provisório para ajudar."),
     ),
 }
+
+
+_EXPRESSIONS_JSON_PATH = Path(__file__).with_name("expressions_data.json")
+
+
+def _load_expression_pools() -> dict[Language, tuple[DailyExpression, ...]]:
+    """Load the Wiktionary snapshot, falling back to hand-authored data.
+
+    The snapshot is produced by ``scripts/fetch_expressions.py`` and lives
+    alongside this module as ``expressions_data.json``. If it's absent or
+    unparseable, we use ``_FALLBACK_EXPRESSIONS`` so the home view never
+    breaks — the app just renders fewer idioms until the script is re-run.
+    """
+    if not _EXPRESSIONS_JSON_PATH.exists():
+        return dict(_FALLBACK_EXPRESSIONS)
+    try:
+        payload = json.loads(_EXPRESSIONS_JSON_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return dict(_FALLBACK_EXPRESSIONS)
+
+    raw = payload.get("languages", {})
+    out: dict[Language, tuple[DailyExpression, ...]] = {}
+    for lang in Language:
+        items = raw.get(lang.value) or []
+        pool = tuple(
+            DailyExpression(text=item["text"], meaning=item["meaning"])
+            for item in items
+            if item.get("text") and item.get("meaning")
+        )
+        if not pool:
+            pool = _FALLBACK_EXPRESSIONS.get(lang, ())
+        out[lang] = pool
+    return out
+
+
+EXPRESSION_POOLS: dict[Language, tuple[DailyExpression, ...]] = _load_expression_pools()
 
 
 # Quotes — short aphorisms by well-known authors in each language.
@@ -215,3 +236,26 @@ def quote_of_the_day(language: Language, today: date | None = None) -> DailyQuot
     if not pool:
         return None
     return pool[_day_index(language, len(pool), today, salt=211)]
+
+
+def expression_to_word_entry(
+    expression: DailyExpression, language: Language
+) -> WordEntry:
+    """Wrap a DailyExpression as a WordEntry so it can be saved as a Card.
+
+    Home's "save this expression" button flows the idiom through the same
+    Card/FSRS/review pipeline as any other lemma. The expression text
+    becomes the lemma and its meaning becomes the single sense's gloss,
+    marked as a PHRASE so the review view renders it cleanly.
+    """
+    return WordEntry(
+        lemma=expression.text,
+        language=language,
+        senses=(
+            Sense(
+                gloss=expression.meaning,
+                part_of_speech=PartOfSpeech.PHRASE,
+            ),
+        ),
+        source="wiktionary-expression",
+    )
