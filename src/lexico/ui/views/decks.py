@@ -1,4 +1,4 @@
-"""Decks view: browse, create, delete personal decks."""
+"""Decks view: browse, create, delete personal decks and individual cards."""
 
 from __future__ import annotations
 
@@ -67,28 +67,74 @@ def render(user_id: str) -> None:
         st.info("No decks yet. Create one above to start saving words.")
         return
 
+    all_langs = sorted({d.source_lang for d in decks}, key=lambda l: l.value)
+    if len(all_langs) > 1:
+        options = ["All"] + [f"{l.flag} {l.display_name}" for l in all_langs]
+        choice = st.radio(
+            "Filter by language",
+            options,
+            horizontal=True,
+            key="decks_lang_filter",
+        )
+        if choice != "All":
+            idx = options.index(choice) - 1
+            decks = [d for d in decks if d.source_lang == all_langs[idx]]
+
     st.divider()
     for deck in decks:
-        with st.container(border=True):
-            cards = store.list_cards(deck.id) if deck.id else []
-            head_col, btn_col = st.columns([4, 1])
-            with head_col:
-                st.markdown(f"### {deck.source_lang.flag} {deck.name}")
-                if deck.description:
-                    st.caption(deck.description)
-                st.write(f"**{len(cards)}** cards")
-            with btn_col:
-                if st.button("🗑 Delete", key=f"del_{deck.id}"):
-                    if deck.id:
-                        store.delete_deck(deck.id)
-                    st.rerun()
+        _render_deck(deck, store)
 
-            if cards:
-                with st.expander(f"Show cards ({len(cards)})"):
-                    for card in cards:
-                        first_sense = card.entry.senses[0].gloss if card.entry.senses else "—"
-                        preview = (first_sense[:80] + "…") if len(first_sense) > 80 else first_sense
-                        st.markdown(
-                            f"- **{card.entry.lemma}** — {preview}"
-                            f"  · due {card.fsrs_state.due_at.date().isoformat()}"
-                        )
+
+def _render_deck(deck: Deck, store) -> None:
+    with st.container(border=True):
+        cards = store.list_cards(deck.id) if deck.id else []
+        head_col, btn_col = st.columns([4, 1])
+        with head_col:
+            st.markdown(f"### {deck.source_lang.flag} {deck.name}")
+            if deck.description:
+                st.caption(deck.description)
+            st.write(f"**{len(cards)}** cards")
+        with btn_col:
+            if st.button("🗑 Delete deck", key=f"del_deck_{deck.id}"):
+                if deck.id:
+                    store.delete_deck(deck.id)
+                st.rerun()
+
+        if not cards:
+            return
+
+        filter_key = f"deck_filter_{deck.id}"
+        query = st.text_input(
+            "Filter cards",
+            key=filter_key,
+            placeholder="Type to narrow by lemma or definition…",
+        )
+        needle = (query or "").strip().lower()
+        if needle:
+            filtered = [
+                c for c in cards
+                if needle in c.entry.lemma.lower()
+                or any(needle in s.gloss.lower() for s in c.entry.senses)
+            ]
+        else:
+            filtered = cards
+
+        with st.expander(f"Show cards ({len(filtered)}/{len(cards)})"):
+            if not filtered:
+                st.caption("No cards match that filter.")
+                return
+            for card in filtered:
+                first_sense = card.entry.senses[0].gloss if card.entry.senses else "—"
+                preview = (first_sense[:80] + "…") if len(first_sense) > 80 else first_sense
+                row_main, row_btn = st.columns([6, 1])
+                with row_main:
+                    st.markdown(
+                        f"**{card.entry.lemma}** — {preview}  "
+                        f"· due {card.fsrs_state.due_at.date().isoformat()}"
+                    )
+                with row_btn:
+                    if card.id is not None and st.button(
+                        "🗑", key=f"del_card_{card.id}", help="Delete this card"
+                    ):
+                        store.delete_card(card.id)
+                        st.rerun()

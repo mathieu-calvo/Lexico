@@ -161,6 +161,12 @@ class DeckStore:
             self._conn.commit()
             return card.model_copy(update={"id": cursor.lastrowid})
 
+    def delete_card(self, card_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM review_logs WHERE card_id = ?", (card_id,))
+            self._conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+            self._conn.commit()
+
     def update_card_state(self, card_id: int, state: FSRSState) -> None:
         with self._lock:
             self._conn.execute(
@@ -241,27 +247,52 @@ class DeckStore:
     def list_review_logs(
         self, user_id: str = "local", limit: int = 1000
     ) -> list[dict]:
+        """Review log rows joined with the card entry (lemma + first gloss).
+
+        The card may have been deleted since the review was logged, in which
+        case `lemma`/`gloss` come back as empty strings — the UI should fall
+        back to a placeholder rather than hide the row.
+        """
         with self._lock:
             rows = self._conn.execute(
-                """SELECT card_id, language, rating, reviewed_at, elapsed_days,
-                          scheduled_days, stability_after, difficulty_after
-                   FROM review_logs WHERE user_id = ?
-                   ORDER BY reviewed_at DESC LIMIT ?""",
+                """SELECT r.card_id, r.language, r.rating, r.reviewed_at,
+                          r.elapsed_days, r.scheduled_days,
+                          r.stability_after, r.difficulty_after,
+                          c.entry_json
+                   FROM review_logs r
+                   LEFT JOIN cards c ON c.id = r.card_id
+                   WHERE r.user_id = ?
+                   ORDER BY r.reviewed_at DESC LIMIT ?""",
                 (user_id, limit),
             ).fetchall()
-        return [
-            {
-                "card_id": r[0],
-                "language": r[1],
-                "rating": r[2],
-                "reviewed_at": datetime.fromisoformat(r[3]),
-                "elapsed_days": r[4],
-                "scheduled_days": r[5],
-                "stability_after": r[6],
-                "difficulty_after": r[7],
-            }
-            for r in rows
-        ]
+        out: list[dict] = []
+        for r in rows:
+            lemma = ""
+            gloss = ""
+            entry_json = r[8]
+            if entry_json:
+                try:
+                    entry = WordEntry.model_validate_json(entry_json)
+                    lemma = entry.lemma
+                    if entry.senses:
+                        gloss = entry.senses[0].gloss
+                except Exception:
+                    pass
+            out.append(
+                {
+                    "card_id": r[0],
+                    "language": r[1],
+                    "rating": r[2],
+                    "reviewed_at": datetime.fromisoformat(r[3]),
+                    "elapsed_days": r[4],
+                    "scheduled_days": r[5],
+                    "stability_after": r[6],
+                    "difficulty_after": r[7],
+                    "lemma": lemma,
+                    "gloss": gloss,
+                }
+            )
+        return out
 
     # ---------- llm usage ----------
 

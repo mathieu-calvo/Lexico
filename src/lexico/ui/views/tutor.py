@@ -12,6 +12,14 @@ def render(user_id: str) -> None:
     st.title("💬 Tutor")
     st.caption("Ask about a word, request examples, compare nuances.")
 
+    enrichment = get_enrichment_service()
+    if not enrichment.is_real_llm_available():
+        st.warning(
+            "⚠️ No real LLM configured. Set `GROQ_API_KEY` in your environment "
+            "(or Streamlit secrets) to get real answers. The stub will otherwise "
+            "reply with a deterministic placeholder."
+        )
+
     history: list[tuple[str, str]] = st.session_state.setdefault("tutor_history", [])
     for role, msg in history:
         with st.chat_message(role):
@@ -25,7 +33,6 @@ def render(user_id: str) -> None:
     with st.chat_message("user"):
         st.write(question)
 
-    enrichment = get_enrichment_service()
     try:
         answer = enrichment.tutor(question, user_id=user_id)
     except BudgetExceeded:

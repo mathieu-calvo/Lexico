@@ -1,4 +1,4 @@
-"""Stats view: per-language XP, retention, streak, due counts."""
+"""Stats view: totals, streak, per-language counts, recent reviews."""
 
 from __future__ import annotations
 
@@ -8,11 +8,10 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import streamlit as st
 
-from lexico.domain.enums import Language
+from lexico.domain.enums import Language, Rating
 from lexico.services import get_deck_store
-from lexico.services.gamification import compute_streak, xp_by_language
+from lexico.services.gamification import compute_streak
 from lexico.ui.components.streak_chip import streak_chip
-from lexico.ui.components.xp_bar import xp_bar
 
 
 def render(user_id: str) -> None:
@@ -21,6 +20,7 @@ def render(user_id: str) -> None:
 
     store = get_deck_store()
     logs = store.list_review_logs(user_id=user_id, limit=5000)
+    decks = store.list_decks(user_id=user_id)
 
     col_a, col_b, col_c = st.columns(3)
     with col_a:
@@ -32,12 +32,27 @@ def render(user_id: str) -> None:
         st.metric("Due now", len(due))
 
     st.divider()
-    st.subheader("XP per language")
-    xp_totals = xp_by_language(logs)
+    st.subheader("Per-language totals")
+
+    cards_by_lang: dict[Language, int] = defaultdict(int)
+    for deck in decks:
+        if deck.id is None:
+            continue
+        cards_by_lang[deck.source_lang] += len(store.list_cards(deck.id))
+    reviews_by_lang: dict[Language, int] = defaultdict(int)
+    for row in logs:
+        try:
+            reviews_by_lang[Language(row["language"])] += 1
+        except ValueError:
+            continue
+
     cols = st.columns(len(Language))
     for col, lang in zip(cols, Language):
         with col:
-            xp_bar(lang, xp_totals.get(lang, 0))
+            with st.container(border=True):
+                st.markdown(f"### {lang.flag} {lang.display_name}")
+                st.caption(f"{cards_by_lang.get(lang, 0)} saved")
+                st.caption(f"{reviews_by_lang.get(lang, 0)} reviews")
 
     st.divider()
     st.subheader("Reviews over the last 30 days")
@@ -58,6 +73,34 @@ def render(user_id: str) -> None:
     st.bar_chart(df)
 
     with st.expander("Recent reviews"):
-        recent = pd.DataFrame(logs[:25])
-        if not recent.empty:
-            st.dataframe(recent, use_container_width=True)
+        rows = []
+        for row in logs[:25]:
+            try:
+                rating_label = Rating(row["rating"]).label
+            except ValueError:
+                rating_label = str(row["rating"])
+            reviewed = row["reviewed_at"]
+            date_str = (
+                reviewed.strftime("%Y-%m-%d %H:%M")
+                if isinstance(reviewed, datetime)
+                else str(reviewed)
+            )
+            try:
+                lang_flag = Language(row["language"]).flag
+            except ValueError:
+                lang_flag = ""
+            rows.append(
+                {
+                    "When": date_str,
+                    "Language": lang_flag,
+                    "Word": row.get("lemma") or "(deleted)",
+                    "Meaning": row.get("gloss") or "",
+                    "Rating": rating_label,
+                }
+            )
+        if rows:
+            st.dataframe(
+                pd.DataFrame(rows),
+                use_container_width=True,
+                hide_index=True,
+            )

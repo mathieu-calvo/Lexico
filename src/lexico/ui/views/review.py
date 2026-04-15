@@ -3,6 +3,16 @@
 Source-only, immersion-first. The user never has to read English (or any
 pivot) to review a word — definitions and prompts stay in the card's own
 language.
+
+Each card goes through a two-phase state machine:
+
+    question → answered
+
+In the `question` phase the user sees a prompt and has a single primary
+action (reveal, check, type, or pick). Rating buttons only appear once the
+card has moved to `answered`, so you never grade a card blind. After rating,
+the state is cleared and Streamlit reruns to show the next due card —
+auto-advance with no extra click.
 """
 
 from __future__ import annotations
@@ -13,7 +23,6 @@ import streamlit as st
 from rapidfuzz.distance import Levenshtein
 
 from lexico.domain.deck import Card
-from lexico.domain.enums import Language
 from lexico.providers.stub_provider import _STUB_ENTRIES
 from lexico.services import get_deck_store, get_enrichment_service
 from lexico.services.review_scheduler import schedule
@@ -23,6 +32,27 @@ from lexico.ui.components.word_card import render_word_card
 
 
 _MODES = ["Reveal", "Cloze", "Recall", "Match"]
+
+
+def _answered_key(card_id: int | None) -> str:
+    return f"review_answered_{card_id}"
+
+
+def _mark_answered(card_id: int | None) -> None:
+    if card_id is not None:
+        st.session_state[_answered_key(card_id)] = True
+
+
+def _is_answered(card_id: int | None) -> bool:
+    return bool(card_id is not None and st.session_state.get(_answered_key(card_id)))
+
+
+def _clear_card_state(card_id: int | None) -> None:
+    if card_id is None:
+        return
+    for prefix in ("review_answered_", "reveal_", "cloze_", "cloze_reveal_",
+                   "recall_", "match_", "match_choice_", "match_check_"):
+        st.session_state.pop(f"{prefix}{card_id}", None)
 
 
 def render(user_id: str) -> None:
@@ -60,7 +90,11 @@ def render(user_id: str) -> None:
     elif mode == "Match":
         _render_match(card, deck.id, store)
 
+    if not _is_answered(card.id):
+        return
+
     st.divider()
+    st.caption("Rate your recall to schedule the next review.")
     rating = rating_buttons(key_prefix=f"rate_{card.id}")
     if rating is not None and card.id is not None:
         new_state, log = schedule(card.fsrs_state, rating)
@@ -68,14 +102,18 @@ def render(user_id: str) -> None:
         log = log.model_copy(update={"card_id": card.id})
         store.log_review(log, user_id=user_id, language=card.entry.language)
         st.toast(f"Scheduled +{new_state.stability:.1f}d", icon="✅")
+        _clear_card_state(card.id)
         st.rerun()
 
 
 def _render_reveal(card: Card) -> None:
     with st.container(border=True):
         st.markdown(f"### {card.entry.lemma}")
-        if not st.toggle("Reveal", key=f"reveal_{card.id}"):
-            st.caption("Recall the meaning, then reveal.")
+        if not _is_answered(card.id):
+            st.caption("Recall the meaning in your head, then reveal.")
+            if st.button("Reveal", key=f"reveal_btn_{card.id}", type="primary"):
+                _mark_answered(card.id)
+                st.rerun()
             return
         render_word_card(card.entry)
 
@@ -95,8 +133,12 @@ def _render_cloze(card: Card, enrichment) -> None:
     with st.container(border=True):
         st.markdown("#### Fill in the blank")
         st.markdown(f"> {cloze.sentence}")
-        if st.toggle("Reveal answer", key=f"cloze_reveal_{card.id}"):
-            st.success(f"**{cloze.answer}**")
+        if not _is_answered(card.id):
+            if st.button("Reveal answer", key=f"cloze_btn_{card.id}", type="primary"):
+                _mark_answered(card.id)
+                st.rerun()
+            return
+        st.success(f"**{cloze.answer}**")
 
 
 def _render_recall(card: Card) -> None:
@@ -106,16 +148,20 @@ def _render_recall(card: Card) -> None:
         st.caption(f"{card.entry.language.display_name} — type the word for:")
         st.markdown(f"> {first_sense}")
         guess = st.text_input("Your answer", key=f"recall_{card.id}")
-        if guess:
-            distance = Levenshtein.distance(
-                guess.strip().lower(), card.entry.lemma.lower()
-            )
-            if distance == 0:
-                st.success(f"✅ Exact: **{card.entry.lemma}**")
-            elif distance <= 2:
-                st.info(f"🟡 Close — exact form: **{card.entry.lemma}**")
-            else:
-                st.error(f"❌ Correct answer: **{card.entry.lemma}**")
+        if not _is_answered(card.id):
+            if st.button("Check", key=f"recall_btn_{card.id}", type="primary") and guess:
+                _mark_answered(card.id)
+                st.rerun()
+            return
+        distance = Levenshtein.distance(
+            (guess or "").strip().lower(), card.entry.lemma.lower()
+        )
+        if distance == 0:
+            st.success(f"✅ Exact: **{card.entry.lemma}**")
+        elif distance <= 2:
+            st.info(f"🟡 Close — exact form: **{card.entry.lemma}**")
+        else:
+            st.error(f"❌ Correct answer: **{card.entry.lemma}**")
 
 
 def _render_match(card: Card, deck_id: int | None, store) -> None:
@@ -149,11 +195,15 @@ def _render_match(card: Card, deck_id: int | None, store) -> None:
             key=f"match_choice_{card.id}",
             label_visibility="collapsed",
         )
-        if st.button("Check", key=f"match_check_{card.id}"):
-            if choice == payload["correct"]:
-                st.success("✅ Correct!")
-            else:
-                st.error(f"❌ Correct answer: _{payload['correct']}_")
+        if not _is_answered(card.id):
+            if st.button("Check", key=f"match_check_{card.id}", type="primary"):
+                _mark_answered(card.id)
+                st.rerun()
+            return
+        if choice == payload["correct"]:
+            st.success("✅ Correct!")
+        else:
+            st.error(f"❌ Correct answer: _{payload['correct']}_")
 
 
 def _match_distractors(card: Card, deck_id: int | None, store) -> list[str]:

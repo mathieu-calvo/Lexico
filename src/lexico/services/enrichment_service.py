@@ -160,6 +160,20 @@ class EnrichmentService:
         except RuntimeError:
             return False
 
+    def is_real_llm_available(self) -> bool:
+        """True iff an available provider is backed by a real API (not stub).
+
+        The home/challenge/tutor views use this to decide whether to show a
+        "no real LLM configured" banner — a stub provider technically satisfies
+        `is_available`, but its canned responses don't actually grade or tutor.
+        """
+        for p in self._providers:
+            if getattr(p, "name", None) == "stub":
+                continue
+            if p.is_available:
+                return True
+        return False
+
 
 def _parse_json(raw: str) -> dict:
     """Tolerant JSON extraction — strips markdown fences if present."""

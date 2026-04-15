@@ -12,6 +12,14 @@ def render(user_id: str) -> None:
     st.title("🎯 Daily challenge")
     st.caption("Use three of your due words in one sentence — the tutor grades it.")
 
+    enrichment = get_enrichment_service()
+    if not enrichment.is_real_llm_available():
+        st.warning(
+            "⚠️ No real LLM configured. Set `GROQ_API_KEY` in your environment "
+            "(or Streamlit secrets) to get real grading. In the meantime you can "
+            "still write sentences — the stub will return a placeholder score."
+        )
+
     store = get_deck_store()
     due = store.get_due_cards(user_id=user_id, limit=20)
     if len(due) < 3:
@@ -24,9 +32,13 @@ def render(user_id: str) -> None:
 
     st.markdown(f"**Language:** {language.flag} {language.display_name}")
     st.markdown("**Use all of these words:**")
+    # Stack vertically on narrow screens (the mobile CSS shim collapses
+    # st.columns to single-column below ~480px).
     cols = st.columns(len(required))
     for col, word in zip(cols, required):
-        col.markdown(f"### {word}")
+        with col:
+            with st.container(border=True):
+                st.markdown(f"### {word}")
 
     sentence = st.text_area("Your sentence", key="challenge_input", height=100)
     if not st.button("Grade", type="primary", key="challenge_grade"):
@@ -35,7 +47,6 @@ def render(user_id: str) -> None:
         st.warning("Write a sentence first.")
         return
 
-    enrichment = get_enrichment_service()
     try:
         result = enrichment.grade_challenge(language, required, sentence, user_id=user_id)
     except BudgetExceeded:
