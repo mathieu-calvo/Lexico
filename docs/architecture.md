@@ -54,6 +54,38 @@ Hand-authored static content that isn't code and isn't user state:
 - `daily_pool` — word-of-the-day, expression-of-the-day, and quote-of-the-day
   pools per language. `home.py` indexes into these deterministically by date.
 
+**Source of the daily pool content.** Everything in `daily_pool.py` is a
+hand-authored Python literal that ships with the codebase. There is no
+static dump, no nightly cron, no web scrape, and no external API behind it.
+Reading `word_of_the_day(Language.FR)` is a pure in-memory array lookup —
+no filesystem, no network, no cache. This keeps the home view renderable
+even when Wiktionary is down, and lets us curate idioms and quotes (which
+would be hard to extract cleanly from a crawl) rather than derive them.
+
+The one caveat: the **home view itself** takes the lemma from the static
+pool and then calls `LookupService.lookup(lemma, language)` to render a
+full word card, so the *definition* behind a word-of-the-day is fetched
+dynamically from the provider chain (usually Wiktionary) and cached
+indefinitely in SQLite. The lemma is static; its dictionary entry is
+dynamic and cached after the first fetch.
+
+**When the pools roll over.** The `_day_index` helper computes
+`(today.toordinal() + language_offset + salt) % pool_size` where `today`
+defaults to `datetime.now(timezone.utc).date()`. Consequences:
+
+- All three items flip at **00:00 UTC**, globally, for every user.
+- There is no per-user state — the function is pure, so the same date
+  produces the same trio on every reload.
+- Three desynchronizers keep the items from lockstepping: independent
+  salts per pool type (`0` / `101` / `211`), per-language offsets
+  (`FR=0, EN=7, IT=13, ES=23, PT=31`), and different pool sizes (~20
+  words, 10 expressions, 7 quotes per language) so each cycles on its
+  own period.
+
+To refresh or extend a pool, edit the tuples in `daily_pool.py` directly
+and redeploy. There is no admin UI, no database table, and no migration —
+the pools are code.
+
 ### services/
 The orchestration layer. No Streamlit imports; each service is independently
 testable.

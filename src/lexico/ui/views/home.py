@@ -32,12 +32,11 @@ def render(user_id: str) -> None:
         st.markdown(f"📒 **{store.count_cards(user_id=user_id)}** saved cards")
 
     st.divider()
-    st.subheader("Words of the day")
-
+    st.subheader("Quote of the day")
     cols = st.columns(len(Language))
     for col, lang in zip(cols, Language):
         with col:
-            _render_word_of_the_day(lookup, lang)
+            _render_quote(lang)
 
     st.divider()
     st.subheader("Expression of the day")
@@ -47,11 +46,11 @@ def render(user_id: str) -> None:
             _render_expression(lang)
 
     st.divider()
-    st.subheader("Quote of the day")
+    st.subheader("Words of the day")
     cols = st.columns(len(Language))
     for col, lang in zip(cols, Language):
         with col:
-            _render_quote(lang)
+            _render_word_of_the_day(lookup, lang)
 
 
 def _render_word_of_the_day(lookup, language: Language) -> None:
