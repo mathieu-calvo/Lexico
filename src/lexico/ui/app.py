@@ -14,7 +14,7 @@ if str(_SRC) not in sys.path:
 import streamlit as st  # noqa: E402
 
 from lexico.config import settings  # noqa: E402
-from lexico.ui import auth  # noqa: E402
+from lexico.ui import auth, persist  # noqa: E402
 from lexico.ui.views import (  # noqa: E402
     challenge,
     decks,
@@ -95,7 +95,9 @@ def main() -> None:
     if settings.require_auth:
         auth.logout_button()
 
+    persist.restore_all()
     _PAGES[page](user_id)
+    persist.save_all()
 
 
 main()

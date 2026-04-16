@@ -20,32 +20,8 @@ _SOURCE_STARRED = "My starred quotes"
 _SOURCE_ALL = "All quotes"
 _GAME_KEY = "quotes_guess_game"
 
-# Widget keys whose values should survive switching to another tab and back.
-# Streamlit can drop widget state when the widget stops being rendered across
-# several reruns; the shadow-key pattern below copies values to/from a
-# non-widget key so they always come back on the next visit.
-_PERSIST_KEYS = (
-    "quotes_mode",
-    "quotes_guess_source",
-    "quotes_guess_language",
-)
-
-
-def _restore_persisted() -> None:
-    for k in _PERSIST_KEYS:
-        shadow = f"_saved_{k}"
-        if shadow in st.session_state and k not in st.session_state:
-            st.session_state[k] = st.session_state[shadow]
-
-
-def _save_persisted() -> None:
-    for k in _PERSIST_KEYS:
-        if k in st.session_state:
-            st.session_state[f"_saved_{k}"] = st.session_state[k]
-
 
 def render(user_id: str) -> None:
-    _restore_persisted()
     st.title("🗣 Quotes")
     st.caption("Your collection of starred quotes — and a game to test who said what.")
 
@@ -57,8 +33,6 @@ def render(user_id: str) -> None:
         _render_browse(user_id, store, enrichment)
     else:
         _render_guess(user_id, store, enrichment)
-
-    _save_persisted()
 
 
 def _quote_key(language: Language, text: str) -> str:
