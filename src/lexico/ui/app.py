@@ -20,6 +20,7 @@ from lexico.ui.views import (  # noqa: E402
     decks,
     home,
     lookup,
+    quotes,
     review,
     stats,
     tutor,
@@ -32,6 +33,7 @@ _PAGES = {
     "📒 Decks": decks.render,
     "🧠 Review": review.render,
     "🎯 Daily challenge": challenge.render,
+    "🗣 Quotes": quotes.render,
     "💬 Tutor": tutor.render,
     "📊 Stats": stats.render,
 }

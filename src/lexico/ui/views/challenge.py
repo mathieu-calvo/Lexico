@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import random
+
 import streamlit as st
 
+from lexico.domain.deck import Card
+from lexico.domain.enums import Language
 from lexico.services import get_deck_store, get_enrichment_service
 from lexico.services.usage_guardrail import BudgetExceeded
+
+
+_LANG_KEY = "challenge_language"
 
 
 def render(user_id: str) -> None:
@@ -21,13 +28,28 @@ def render(user_id: str) -> None:
         )
 
     store = get_deck_store()
-    due = store.get_due_cards(user_id=user_id, limit=20)
-    if len(due) < 3:
-        st.info("You need at least **3 due cards** to play. Save more words on Lookup!")
+    due = store.get_due_cards(user_id=user_id, limit=500)
+    by_lang: dict[Language, list[Card]] = {}
+    for c in due:
+        by_lang.setdefault(c.entry.language, []).append(c)
+    valid_langs = [lang for lang, cards in by_lang.items() if len(cards) >= 3]
+    if not valid_langs:
+        st.info("You need at least **3 due cards** in one language to play. Save more words on Lookup!")
         return
 
-    picks = due[:3]
-    language = picks[0].entry.language
+    # Random default on first visit; user-selected value sticks after.
+    valid_values = [lang.value for lang in valid_langs]
+    if st.session_state.get(_LANG_KEY) not in valid_values:
+        st.session_state[_LANG_KEY] = random.choice(valid_values)
+
+    lang_choice = st.selectbox(
+        "Language",
+        valid_values,
+        format_func=lambda v: f"{Language(v).flag} {Language(v).display_name}",
+        key=_LANG_KEY,
+    )
+    language = Language(lang_choice)
+    picks = by_lang[language][:3]
     required = [c.entry.lemma for c in picks]
 
     st.markdown(f"**Language:** {language.flag} {language.display_name}")

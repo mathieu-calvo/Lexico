@@ -23,6 +23,7 @@ import streamlit as st
 from rapidfuzz.distance import Levenshtein
 
 from lexico.domain.deck import Card
+from lexico.domain.enums import Language
 from lexico.providers.stub_provider import _STUB_ENTRIES
 from lexico.services import get_deck_store, get_enrichment_service
 from lexico.services.review_scheduler import schedule
@@ -32,6 +33,8 @@ from lexico.ui.components.word_card import render_word_card
 
 
 _MODES = ["Reveal", "Cloze", "Recall", "Match"]
+_ALL_LANGS = "All"
+_CURRENT_CARD_KEY = "review_current_card_id"
 
 
 def _answered_key(card_id: int | None) -> str:
@@ -51,8 +54,10 @@ def _clear_card_state(card_id: int | None) -> None:
     if card_id is None:
         return
     for prefix in ("review_answered_", "reveal_", "cloze_", "cloze_reveal_",
-                   "recall_", "match_", "match_choice_", "match_check_"):
+                   "cloze_guess_", "recall_", "match_", "match_choice_",
+                   "match_check_"):
         st.session_state.pop(f"{prefix}{card_id}", None)
+    st.session_state.pop(_CURRENT_CARD_KEY, None)
 
 
 def render(user_id: str) -> None:
@@ -67,13 +72,26 @@ def render(user_id: str) -> None:
         st.info("No decks yet — head to **Lookup** or **Decks** to create one.")
         return
 
-    mode = st.radio("Mode", _MODES, horizontal=True, key="review_mode")
-    due_cards = store.get_due_cards(user_id=user_id, limit=1)
+    col_lang, col_mode = st.columns([1, 3])
+    with col_lang:
+        lang_choice = st.selectbox(
+            "Language",
+            [_ALL_LANGS, *[lang.value for lang in Language]],
+            format_func=lambda v: "🌐 All" if v == _ALL_LANGS
+            else f"{Language(v).flag} {Language(v).display_name}",
+            key="review_language",
+        )
+    with col_mode:
+        mode = st.radio("Mode", _MODES, horizontal=True, key="review_mode")
+
+    due_cards = store.get_due_cards(user_id=user_id, limit=500)
+    if lang_choice != _ALL_LANGS:
+        due_cards = [c for c in due_cards if c.entry.language.value == lang_choice]
     if not due_cards:
-        st.success("🎉 Nothing due right now. Come back later!")
+        st.success("🎉 Nothing due for this selection. Come back later!")
         return
 
-    card = due_cards[0]
+    card = _pick_current_card(due_cards)
     deck = decks.get(card.deck_id)
     if deck is None:
         st.warning("Card belongs to a missing deck.")
@@ -106,6 +124,22 @@ def render(user_id: str) -> None:
         st.rerun()
 
 
+def _pick_current_card(due_cards: list[Card]) -> Card:
+    """Stick with the same card across reruns; pick a fresh random one otherwise.
+
+    The current card id is held in session state so that switching modes or
+    typing a guess doesn't reshuffle mid-review. It's cleared after rating
+    (see _clear_card_state), which is the signal to roll the dice again.
+    """
+    due_ids = {c.id for c in due_cards}
+    current_id = st.session_state.get(_CURRENT_CARD_KEY)
+    if current_id in due_ids:
+        return next(c for c in due_cards if c.id == current_id)
+    card = random.choice(due_cards)
+    st.session_state[_CURRENT_CARD_KEY] = card.id
+    return card
+
+
 def _render_reveal(card: Card) -> None:
     with st.container(border=True):
         st.markdown(f"### {card.entry.lemma}")
@@ -133,12 +167,13 @@ def _render_cloze(card: Card, enrichment) -> None:
     with st.container(border=True):
         st.markdown("#### Fill in the blank")
         st.markdown(f"> {cloze.sentence}")
+        guess = st.text_input("Your answer", key=f"cloze_guess_{card.id}")
         if not _is_answered(card.id):
-            if st.button("Reveal answer", key=f"cloze_btn_{card.id}", type="primary"):
+            if st.button("Check", key=f"cloze_btn_{card.id}", type="primary"):
                 _mark_answered(card.id)
                 st.rerun()
             return
-        st.success(f"**{cloze.answer}**")
+        _render_text_feedback(guess, cloze.answer)
 
 
 def _render_recall(card: Card) -> None:
@@ -149,19 +184,26 @@ def _render_recall(card: Card) -> None:
         st.markdown(f"> {first_sense}")
         guess = st.text_input("Your answer", key=f"recall_{card.id}")
         if not _is_answered(card.id):
-            if st.button("Check", key=f"recall_btn_{card.id}", type="primary") and guess:
+            if st.button("Check", key=f"recall_btn_{card.id}", type="primary"):
                 _mark_answered(card.id)
                 st.rerun()
             return
-        distance = Levenshtein.distance(
-            (guess or "").strip().lower(), card.entry.lemma.lower()
-        )
-        if distance == 0:
-            st.success(f"✅ Exact: **{card.entry.lemma}**")
-        elif distance <= 2:
-            st.info(f"🟡 Close — exact form: **{card.entry.lemma}**")
-        else:
-            st.error(f"❌ Correct answer: **{card.entry.lemma}**")
+        _render_text_feedback(guess, card.entry.lemma)
+
+
+def _render_text_feedback(guess: str, answer: str) -> None:
+    """Shared feedback for typed-answer modes (Recall, Cloze)."""
+    cleaned = (guess or "").strip()
+    if not cleaned:
+        st.info(f"Correct answer: **{answer}**")
+        return
+    distance = Levenshtein.distance(cleaned.lower(), answer.lower())
+    if distance == 0:
+        st.success(f"✅ Exact: **{answer}**")
+    elif distance <= 2:
+        st.info(f"🟡 Close — exact form: **{answer}**")
+    else:
+        st.error(f"❌ Correct answer: **{answer}**")
 
 
 def _render_match(card: Card, deck_id: int | None, store) -> None:
@@ -192,6 +234,7 @@ def _render_match(card: Card, deck_id: int | None, store) -> None:
         choice = st.radio(
             "Choices",
             payload["options"],
+            index=None,
             key=f"match_choice_{card.id}",
             label_visibility="collapsed",
         )
@@ -200,7 +243,9 @@ def _render_match(card: Card, deck_id: int | None, store) -> None:
                 _mark_answered(card.id)
                 st.rerun()
             return
-        if choice == payload["correct"]:
+        if choice is None:
+            st.info(f"Correct answer: _{payload['correct']}_")
+        elif choice == payload["correct"]:
             st.success("✅ Correct!")
         else:
             st.error(f"❌ Correct answer: _{payload['correct']}_")

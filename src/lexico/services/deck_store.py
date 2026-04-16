@@ -58,9 +58,18 @@ _SCHEMA = [
         usd REAL NOT NULL,
         called_at TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS liked_quotes (
+        user_id TEXT NOT NULL,
+        language TEXT NOT NULL,
+        text TEXT NOT NULL,
+        author TEXT NOT NULL,
+        liked_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, language, text)
+    )""",
     "CREATE INDEX IF NOT EXISTS idx_cards_deck ON cards(deck_id)",
     "CREATE INDEX IF NOT EXISTS idx_reviews_user ON review_logs(user_id, reviewed_at)",
     "CREATE INDEX IF NOT EXISTS idx_usage_user_time ON llm_usage_log(user_id, called_at)",
+    "CREATE INDEX IF NOT EXISTS idx_liked_quotes_user ON liked_quotes(user_id, liked_at)",
 ]
 
 
@@ -337,6 +346,64 @@ class DeckStore:
                 (today,),
             ).fetchone()
         return float(row[0])
+
+    # ---------- liked quotes ----------
+
+    def like_quote(
+        self, user_id: str, language: Language, text: str, author: str
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO liked_quotes (user_id, language, text, author, liked_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, language, text) DO UPDATE SET author = excluded.author""",
+                (user_id, language.value, text, author, _now_iso()),
+            )
+            self._conn.commit()
+
+    def unlike_quote(self, user_id: str, language: Language, text: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM liked_quotes WHERE user_id = ? AND language = ? AND text = ?",
+                (user_id, language.value, text),
+            )
+            self._conn.commit()
+
+    def is_quote_liked(self, user_id: str, language: Language, text: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM liked_quotes WHERE user_id = ? AND language = ? AND text = ?",
+                (user_id, language.value, text),
+            ).fetchone()
+        return row is not None
+
+    def list_liked_quotes(
+        self, user_id: str = "local", language: Language | None = None
+    ) -> list[dict]:
+        with self._lock:
+            if language is None:
+                rows = self._conn.execute(
+                    """SELECT language, text, author, liked_at
+                       FROM liked_quotes WHERE user_id = ?
+                       ORDER BY liked_at DESC""",
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """SELECT language, text, author, liked_at
+                       FROM liked_quotes WHERE user_id = ? AND language = ?
+                       ORDER BY liked_at DESC""",
+                    (user_id, language.value),
+                ).fetchall()
+        return [
+            {
+                "language": Language(r[0]),
+                "text": r[1],
+                "author": r[2],
+                "liked_at": datetime.fromisoformat(r[3]),
+            }
+            for r in rows
+        ]
 
     def close(self) -> None:
         with self._lock:

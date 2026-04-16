@@ -143,6 +143,17 @@ class EnrichmentService:
             correction=data.get("correction", ""),
         )
 
+    def quote_context(
+        self, language: Language, text: str, author: str, user_id: str = "local"
+    ) -> str:
+        return self._call(
+            user_id,
+            prompts.QUOTE_CONTEXT_SYSTEM,
+            prompts.quote_context_user(language, text, author),
+            json_mode=False,
+            max_tokens=400,
+        )
+
     def tutor(self, question: str, context: str = "", user_id: str = "local") -> str:
         user = f"{context}\n\nUser: {question}" if context else question
         return self._call(
