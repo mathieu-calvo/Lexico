@@ -25,6 +25,7 @@ dist/
 venv/
 .idea/
 .vscode/
+.claude/
 *.swp
 .DS_Store
 Thumbs.db
