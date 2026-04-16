@@ -33,6 +33,7 @@ PERSIST_KEYS: tuple[str, ...] = (
     "challenge_language",
     # quotes
     "quotes_mode",
+    "quotes_browse_language",
     "quotes_guess_source",
     "quotes_guess_language",
 )

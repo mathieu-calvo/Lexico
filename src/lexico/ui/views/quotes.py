@@ -20,6 +20,11 @@ _SOURCE_STARRED = "My starred quotes"
 _SOURCE_ALL = "All quotes"
 _GAME_KEY = "quotes_guess_game"
 
+# Carousel state for the Starred browser.
+_BROWSE_ORDER_KEY = "quotes_browse_order"
+_BROWSE_INDEX_KEY = "quotes_browse_index"
+_BROWSE_SIG_KEY = "quotes_browse_signature"
+
 
 def render(user_id: str) -> None:
     st.title("🗣 Quotes")
@@ -75,34 +80,91 @@ def _render_context_button(
 
 
 def _render_browse(user_id: str, store, enrichment) -> None:
+    """Carousel browser for starred quotes: language filter + Prev/Next."""
     liked = store.list_liked_quotes(user_id=user_id)
     if not liked:
         st.info("No starred quotes yet — head to **Home** and tap ☆ on any Quote of the day.")
         return
 
-    by_lang: dict[Language, list[dict]] = {}
-    for q in liked:
-        by_lang.setdefault(q["language"], []).append(q)
+    lang_choice = st.selectbox(
+        "Language",
+        [_ALL_LANGS, *[lang.value for lang in Language]],
+        format_func=lambda v: "🌐 All" if v == _ALL_LANGS
+        else f"{Language(v).flag} {Language(v).display_name}",
+        key="quotes_browse_language",
+    )
+    if lang_choice != _ALL_LANGS:
+        filtered = [q for q in liked if q["language"].value == lang_choice]
+    else:
+        filtered = liked
+    if not filtered:
+        st.info("No starred quotes in this language yet.")
+        return
 
-    for lang in Language:
-        entries = by_lang.get(lang, [])
-        if not entries:
-            continue
-        st.subheader(f"{lang.flag} {lang.display_name}")
-        for entry in entries:
-            with st.container(border=True):
-                st.markdown(f"_“{entry['text']}”_")
-                st.caption(f"— {entry['author']}")
-                col_remove, col_ctx = st.columns([1, 3])
-                with col_remove:
-                    rm_key = f"unlike_{lang.value}_{_quote_key(lang, entry['text'])}"
-                    if st.button("💔 Remove", key=rm_key):
-                        store.unlike_quote(user_id, lang, entry["text"])
-                        st.rerun()
-                with col_ctx:
-                    _render_context_button(
-                        enrichment, lang, entry["text"], entry["author"], "browse"
-                    )
+    # Reshuffle whenever the filter or collection size changes. The signature
+    # also catches "user just unstarred the current card" — we can't stay on
+    # the same index because the list shrank.
+    signature = (lang_choice, len(filtered))
+    if st.session_state.get(_BROWSE_SIG_KEY) != signature:
+        order = list(range(len(filtered)))
+        random.shuffle(order)
+        st.session_state[_BROWSE_ORDER_KEY] = order
+        st.session_state[_BROWSE_INDEX_KEY] = 0
+        st.session_state[_BROWSE_SIG_KEY] = signature
+
+    order: list[int] = st.session_state[_BROWSE_ORDER_KEY]
+    idx = st.session_state[_BROWSE_INDEX_KEY] % len(order)
+    entry = filtered[order[idx]]
+    lang = entry["language"]
+
+    # Centered large slide — narrow side columns act as visual margins so the
+    # card doesn't stretch edge-to-edge on wide monitors.
+    _, card_col, _ = st.columns([1, 6, 1])
+    with card_col:
+        with st.container(border=True):
+            st.markdown(
+                f"<div style='text-align:center; font-size:1rem; opacity:0.7; "
+                f"margin-bottom:0.5rem;'>{lang.flag} {lang.display_name}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='text-align:center; font-size:1.6rem; "
+                f"line-height:1.5; font-style:italic; padding:1.5rem 1rem;'>"
+                f"“{entry['text']}”</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='text-align:center; font-size:1.1rem; "
+                f"margin-bottom:1rem;'>— <b>{entry['author']}</b></div>",
+                unsafe_allow_html=True,
+            )
+
+        nav_prev, nav_pos, nav_next = st.columns([1, 2, 1])
+        with nav_prev:
+            if st.button("⬅ Prev", key="quotes_browse_prev", use_container_width=True):
+                st.session_state[_BROWSE_INDEX_KEY] = (idx - 1) % len(order)
+                st.rerun()
+        with nav_pos:
+            st.markdown(
+                f"<div style='text-align:center; padding-top:0.4rem; "
+                f"opacity:0.7;'>{idx + 1} / {len(order)}</div>",
+                unsafe_allow_html=True,
+            )
+        with nav_next:
+            if st.button("Next ➡", key="quotes_browse_next", use_container_width=True):
+                st.session_state[_BROWSE_INDEX_KEY] = (idx + 1) % len(order)
+                st.rerun()
+
+        action_ctx, action_rm = st.columns([3, 1])
+        with action_ctx:
+            _render_context_button(
+                enrichment, lang, entry["text"], entry["author"], "browse"
+            )
+        with action_rm:
+            rm_key = f"unlike_{lang.value}_{_quote_key(lang, entry['text'])}"
+            if st.button("💔 Remove", key=rm_key, use_container_width=True):
+                store.unlike_quote(user_id, lang, entry["text"])
+                st.rerun()
 
 
 def _render_guess(user_id: str, store, enrichment) -> None:
