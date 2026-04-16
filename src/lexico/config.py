@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # Paid providers (claude) are intentionally NOT in the default chain —
     # Lexico runs at $0/month by default. Opt in by adding "claude" to the
     # chain AND raising daily_usd_cap above 0.
-    provider_order: str = "stub,wiktionary,groq"
+    provider_order: str = "wiktionary,groq,stub"
     groq_api_key: str | None = None
     anthropic_api_key: str | None = None
     groq_model: str = "llama-3.3-70b-versatile"
