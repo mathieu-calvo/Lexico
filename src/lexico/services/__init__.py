@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from lexico.services.deck_store import DeckStore
     from lexico.services.enrichment_service import EnrichmentService
     from lexico.services.lookup_service import LookupService
+    from lexico.services.pg_deck_store import PgDeckStore
+
+    DeckStoreLike = Union[DeckStore, PgDeckStore]
 
 
 @lru_cache(maxsize=1)
@@ -65,8 +68,11 @@ def get_enrichment_service() -> "EnrichmentService":
     if not providers:
         from lexico.providers.stub_provider import StubLlmProvider
         providers.append(StubLlmProvider())
+    # Share the same store instance so the guardrail reads/writes the same
+    # llm_usage_log rows the rest of the app sees — and works transparently
+    # with either the SQLite or Postgres backend.
     guardrail = UsageGuardrail(
-        settings.db_path,
+        get_deck_store(),
         per_user_daily=settings.max_llm_calls_per_user_per_day,
         global_daily=settings.max_llm_calls_per_day,
         daily_usd_cap=settings.daily_usd_cap,
@@ -75,8 +81,19 @@ def get_enrichment_service() -> "EnrichmentService":
 
 
 @lru_cache(maxsize=1)
-def get_deck_store() -> "DeckStore":
-    from lexico.config import settings
-    from lexico.services.deck_store import DeckStore
+def get_deck_store() -> "DeckStoreLike":
+    """Return the deck store, picking Postgres when a database_url is set.
 
+    Postgres (Supabase) is used on Streamlit Cloud where ``database_url`` is
+    provided via secrets. Local dev and unconfigured deployments fall back to
+    the SQLite file under ``~/.lexico/lexico.db``. Callers receive the same
+    public API either way — the two implementations are method-compatible.
+    """
+    from lexico.config import settings
+
+    if settings.database_url:
+        from lexico.services.pg_deck_store import PgDeckStore
+        return PgDeckStore(settings.database_url)
+
+    from lexico.services.deck_store import DeckStore
     return DeckStore(settings.db_path)

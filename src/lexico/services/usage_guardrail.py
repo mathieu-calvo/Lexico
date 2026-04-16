@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-
-from lexico.services.deck_store import DeckStore
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -14,23 +12,45 @@ class BudgetExceeded(Exception):
     """Raised when an LLM call would exceed a configured cap."""
 
 
+class _UsageBackend(Protocol):
+    """Subset of DeckStore / PgDeckStore that the guardrail actually needs."""
+
+    def llm_calls_today(self, user_id: str | None = None) -> int: ...
+
+    def llm_usd_today(self) -> float: ...
+
+    def log_llm_usage(
+        self,
+        user_id: str,
+        provider: str,
+        model: str,
+        tokens_in: int,
+        tokens_out: int,
+        usd: float,
+    ) -> None: ...
+
+
 class UsageGuardrail:
-    """Hard budget enforcer backed by a DeckStore's llm_usage_log table.
+    """Hard budget enforcer backed by a store's llm_usage_log table.
 
     The API is deliberately minimal: callers ask `allow(...)` before
     making an LLM call; if it returns normally, they proceed, then
     report actual usage back via `record(...)`. A tripped cap raises
     BudgetExceeded so UI code can show a friendly message.
+
+    The guardrail accepts any store implementing ``_UsageBackend`` — both
+    the SQLite ``DeckStore`` and the Postgres ``PgDeckStore`` qualify, so
+    local and cloud deployments share this code unchanged.
     """
 
     def __init__(
         self,
-        db_path: str | Path,
+        store: _UsageBackend,
         per_user_daily: int,
         global_daily: int,
         daily_usd_cap: float,
     ) -> None:
-        self._store = DeckStore(db_path)
+        self._store = store
         self._per_user_daily = per_user_daily
         self._global_daily = global_daily
         self._daily_usd_cap = daily_usd_cap
