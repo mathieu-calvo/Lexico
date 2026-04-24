@@ -178,6 +178,8 @@ pytest -m slow         # integration tests hitting real Groq (needs GROQ_API_KEY
 
 Push to GitHub, connect the repo on [share.streamlit.io](https://share.streamlit.io), paste the contents of `.streamlit/secrets.toml.example` into the web Secrets editor with real values. Supabase Postgres on the free tier handles multi-user state; SQLite handles local dev.
 
+Lexico's Supabase project is **shared** with other hobby apps (Incomplete-Info-Problem, future ones) under a schema-per-app layout — `lexico.*` for content, `shared.app_events` for cross-app traffic. One Supabase free-tier project hosts every small app except Portfolio-Simulator (which stays separate). See [`docs/deployment-guide.md`](docs/deployment-guide.md) for the one-time shared-project setup.
+
 ---
 
 ## License
