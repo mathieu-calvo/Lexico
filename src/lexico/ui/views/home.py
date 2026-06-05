@@ -122,8 +122,11 @@ def _render_save_to_deck(
             )
             if st.button("Add", key=f"{key_prefix}_save_{language.value}", type="primary"):
                 if deck.id is not None:
-                    store.add_card(Card.new(entry, deck_id=deck.id))
-                    st.success(f"Added to *{deck.name}*.")
+                    if store.card_exists(deck.id, entry.lemma):
+                        st.info(f"**{entry.lemma}** is already in *{deck.name}*.")
+                    else:
+                        store.add_card(Card.new(entry, deck_id=deck.id))
+                        st.success(f"Added to *{deck.name}*.")
         else:
             default_name = "Expressions" if key_prefix == "expr" else "Words of the day"
             new_name = st.text_input(
@@ -138,7 +141,7 @@ def _render_save_to_deck(
                 )
                 if new_deck.id is not None:
                     store.add_card(Card.new(entry, deck_id=new_deck.id))
-                    st.success(f"Created **{name}** and added.")
+                    st.toast(f"Created **{name}** and added.", icon="📒")
                     st.rerun()
 
 

@@ -91,6 +91,9 @@ def clone_seed_deck(
         except LookupError:
             skipped += 1
             continue
+        if store.card_exists(deck.id, entry.lemma):
+            skipped += 1
+            continue
         store.add_card(Card.new(entry, deck_id=deck.id))
         added += 1
     return deck, added, skipped

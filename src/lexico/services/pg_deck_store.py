@@ -192,6 +192,30 @@ class PgDeckStore:
             cur.execute("DELETE FROM decks WHERE id = %s", (deck_id,))
             self._conn.commit()
 
+    def update_deck(
+        self,
+        deck_id: int,
+        *,
+        name: str,
+        source_lang: Language,
+        description: str,
+    ) -> None:
+        """Rename / re-language / re-describe a deck. Raises ValueError on name clash."""
+        with self._lock, self._conn.cursor() as cur:
+            try:
+                cur.execute(
+                    """UPDATE decks
+                       SET name = %s, source_lang = %s, description = %s
+                       WHERE id = %s""",
+                    (name, source_lang.value, description, deck_id),
+                )
+                self._conn.commit()
+            except psycopg2.IntegrityError as exc:
+                self._conn.rollback()
+                raise ValueError(
+                    f"A deck named {name!r} already exists."
+                ) from exc
+
     # ---------- cards ----------
 
     def add_card(self, card: Card) -> Card:
@@ -227,6 +251,19 @@ class PgDeckStore:
                 (_to_jsonb(state), card_id),
             )
             self._conn.commit()
+
+    def card_exists(self, deck_id: int, lemma: str) -> bool:
+        """True if a card with this lemma (case-insensitive) is already in the deck."""
+        with self._lock, self._conn.cursor() as cur:
+            cur.execute(
+                """SELECT 1 FROM cards
+                   WHERE deck_id = %s
+                   AND LOWER(entry_json ->> 'lemma') = LOWER(%s)
+                   LIMIT 1""",
+                (deck_id, lemma),
+            )
+            row = cur.fetchone()
+        return row is not None
 
     def list_cards(self, deck_id: int) -> list[Card]:
         with self._lock, self._conn.cursor() as cur:

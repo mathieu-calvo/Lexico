@@ -60,7 +60,7 @@ def render(user_id: str) -> None:
                     description=description,
                 )
             )
-            st.success(f"Created **{name}**.")
+            st.toast(f"Created deck **{name}**.", icon="📒")
             st.rerun()
 
     if not decks:
@@ -88,14 +88,25 @@ def render(user_id: str) -> None:
 def _render_deck(deck: Deck, store) -> None:
     with st.container(border=True):
         cards = store.list_cards(deck.id) if deck.id else []
-        head_col, btn_col = st.columns([4, 1])
+        edit_key = f"deck_edit_{deck.id}"
+        editing = st.session_state.get(edit_key, False)
+
+        if editing:
+            _render_deck_edit_form(deck, store, edit_key)
+            return
+
+        head_col, edit_col, del_col = st.columns([4, 1, 1])
         with head_col:
             st.markdown(f"### {deck.source_lang.flag} {deck.name}")
             if deck.description:
                 st.caption(deck.description)
             st.write(f"**{len(cards)}** cards")
-        with btn_col:
-            if st.button("🗑 Delete deck", key=f"del_deck_{deck.id}"):
+        with edit_col:
+            if st.button("✏️ Edit", key=f"edit_deck_{deck.id}"):
+                st.session_state[edit_key] = True
+                st.rerun()
+        with del_col:
+            if st.button("🗑 Delete", key=f"del_deck_{deck.id}"):
                 if deck.id:
                     store.delete_deck(deck.id)
                 st.rerun()
@@ -138,3 +149,49 @@ def _render_deck(deck: Deck, store) -> None:
                     ):
                         store.delete_card(card.id)
                         st.rerun()
+
+
+def _render_deck_edit_form(deck: Deck, store, edit_key: str) -> None:
+    st.markdown(f"### ✏️ Editing {deck.source_lang.flag} {deck.name}")
+    langs = list(Language)
+    with st.form(key=f"deck_form_{deck.id}", clear_on_submit=False):
+        new_name = st.text_input("Name", value=deck.name, key=f"edit_name_{deck.id}")
+        new_lang = st.selectbox(
+            "Language",
+            langs,
+            index=langs.index(deck.source_lang),
+            format_func=lambda l: f"{l.flag} {l.display_name}",
+            key=f"edit_lang_{deck.id}",
+        )
+        new_desc = st.text_area(
+            "Description",
+            value=deck.description,
+            key=f"edit_desc_{deck.id}",
+        )
+        col_save, col_cancel = st.columns(2)
+        with col_save:
+            saved = st.form_submit_button("💾 Save", type="primary")
+        with col_cancel:
+            cancelled = st.form_submit_button("Cancel")
+
+    if cancelled:
+        st.session_state.pop(edit_key, None)
+        st.rerun()
+    if saved:
+        name = (new_name or "").strip()
+        if not name:
+            st.error("Name cannot be empty.")
+            return
+        try:
+            store.update_deck(
+                deck.id,
+                name=name,
+                source_lang=new_lang,
+                description=new_desc or "",
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        st.session_state.pop(edit_key, None)
+        st.toast(f"Updated **{name}**.", icon="✏️")
+        st.rerun()

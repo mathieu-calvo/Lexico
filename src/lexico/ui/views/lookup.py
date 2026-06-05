@@ -49,14 +49,19 @@ def render(user_id: str) -> None:
     st.subheader("Save to a deck")
 
     store = get_deck_store()
-    decks = store.list_decks(user_id=user_id)
+    decks = [
+        d for d in store.list_decks(user_id=user_id)
+        if d.source_lang == language
+    ]
     deck = deck_picker(decks, key="lookup_deck")
 
     if deck is not None and deck.id is not None:
         if st.button("➕ Add card", type="primary", key="lookup_save"):
-            card = Card.new(entry, deck_id=deck.id)
-            store.add_card(card)
-            st.success(f"Added **{entry.lemma}** to *{deck.name}*.")
+            if store.card_exists(deck.id, entry.lemma):
+                st.info(f"**{entry.lemma}** is already in *{deck.name}*.")
+            else:
+                store.add_card(Card.new(entry, deck_id=deck.id))
+                st.success(f"Added **{entry.lemma}** to *{deck.name}*.")
     else:
         with st.expander("Or create a new deck"):
             name = st.text_input("Deck name", key="lookup_new_deck_name")
@@ -66,5 +71,5 @@ def render(user_id: str) -> None:
                 )
                 if new_deck.id:
                     store.add_card(Card.new(entry, deck_id=new_deck.id))
-                st.success(f"Created **{name}** and added **{entry.lemma}**.")
+                st.toast(f"Created **{name}** and added **{entry.lemma}**.", icon="📒")
                 st.rerun()

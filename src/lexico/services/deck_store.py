@@ -150,6 +150,29 @@ class DeckStore:
             self._conn.execute("DELETE FROM decks WHERE id = ?", (deck_id,))
             self._conn.commit()
 
+    def update_deck(
+        self,
+        deck_id: int,
+        *,
+        name: str,
+        source_lang: Language,
+        description: str,
+    ) -> None:
+        """Rename / re-language / re-describe a deck. Raises ValueError on name clash."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    """UPDATE decks
+                       SET name = ?, source_lang = ?, description = ?
+                       WHERE id = ?""",
+                    (name, source_lang.value, description, deck_id),
+                )
+                self._conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(
+                    f"A deck named {name!r} already exists."
+                ) from exc
+
     # ---------- cards ----------
 
     def add_card(self, card: Card) -> Card:
@@ -183,6 +206,18 @@ class DeckStore:
                 (state.model_dump_json(), card_id),
             )
             self._conn.commit()
+
+    def card_exists(self, deck_id: int, lemma: str) -> bool:
+        """True if a card with this lemma (case-insensitive) is already in the deck."""
+        with self._lock:
+            row = self._conn.execute(
+                """SELECT 1 FROM cards
+                   WHERE deck_id = ?
+                   AND LOWER(json_extract(entry_json, '$.lemma')) = LOWER(?)
+                   LIMIT 1""",
+                (deck_id, lemma),
+            ).fetchone()
+        return row is not None
 
     def list_cards(self, deck_id: int) -> list[Card]:
         with self._lock:
