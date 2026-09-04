@@ -271,9 +271,18 @@ own copy of this workflow.)
 ### One-time setup
 
 1. Run [`scripts/supabase_schema.sql`](../scripts/supabase_schema.sql) if you
-   haven't since this was added — it creates `shared.keepalive_heartbeat` plus
-   the RLS policies letting the anon key insert/update that one row. The table
-   holds no user data, so this grants nothing sensitive.
+   haven't since this was added — it creates `shared.keepalive_heartbeat` and
+   grants `anon` INSERT/UPDATE on that one table. Select nothing in the editor
+   before hitting **Run**: the Supabase SQL editor executes only the
+   highlighted text when there is a selection, and a partially-applied block
+   reports the same "Success. No rows returned." as a complete one.
+
+   > **This table alone runs with RLS disabled** — deliberately. It holds
+   > `(1, <timestamp>)` and no user data, the `GRANT` is what limits access,
+   > and the only policy that would make sense (`WITH CHECK (true)`) is
+   > equivalent to no RLS. Expect a standing "RLS disabled on a public-facing
+   > table" entry in Supabase's **Security Advisor** for it; every *other*
+   > table on this project keeps RLS enabled and doing real work.
 2. Confirm `shared` is listed under **Project Settings → Data API → Exposed
    schemas** (it already is if IIP's traffic logging works). PostgREST only
    sees schemas on that list. The dashboard used to call this page "API"; it
@@ -282,9 +291,9 @@ own copy of this workflow.)
 3. Copy the **Project URL** from **Project Settings → Data API**, and a
    client key from **Project Settings → API Keys**: either the **publishable**
    key (`sb_publishable_…`, the current format) or the legacy **anon public**
-   key. Both authenticate as the `anon` role, which is what the RLS policies
-   above are written against. Never the `sb_secret_…` / service-role key —
-   it bypasses RLS.
+   key. Both resolve to the `anon` role, which is the role the grant above is
+   written for. Never the `sb_secret_…` / service-role key — it bypasses RLS
+   everywhere, and GitHub Actions logs are the wrong place for it.
 4. GitHub → the Lexico repo → **Settings → Secrets and variables → Actions →
    New repository secret**, and add:
 
@@ -508,12 +517,30 @@ levers if `lexico` ever dominates:
   days of repo inactivity (Step 8).
 - **Keepalive run fails with `relation "keepalive_heartbeat" does not exist`**
   — either `scripts/supabase_schema.sql` hasn't been re-run since the table was
-  added, or `shared` is missing from **Project Settings → API → Exposed
+  added, or `shared` is missing from **Project Settings → Data API → Exposed
   schemas**.
-- **Keepalive run fails with `new row violates row-level security policy`** —
-  the `SUPABASE_ANON_KEY` secret is wrong, or the RLS policies at the bottom of
-  `scripts/supabase_schema.sql` were never applied.
-- **Keepalive run fails with `401 Unauthorized`** — the key is being sent as a
-  bearer token but isn't a JWT (the `sb_publishable_…` format), or the secret
-  is truncated. The workflow handles the format split itself, so re-copy the
-  key with the dashboard's copy button and re-run.
+- **Keepalive run fails with a bare `401 Unauthorized` and no JSON body** — a
+  `sb_publishable_…` key was sent as `Authorization: Bearer`. It is not a JWT,
+  so PostgREST rejects it before RLS or the schema list are ever consulted.
+  The workflow sniffs the key format itself now, so this means the secret is
+  truncated or from the wrong project — re-copy it with the dashboard's copy
+  button.
+- **Keepalive run fails with `42501 permission denied for table`** — the
+  `GRANT` lines at the bottom of `scripts/supabase_schema.sql` never executed.
+  This is the partial-selection trap in the SQL editor (Step 8.1). Verify with:
+  ```sql
+  SELECT has_schema_privilege('anon', 'shared', 'USAGE')                     AS schema_usage,
+         has_table_privilege('anon', 'shared.keepalive_heartbeat', 'INSERT')  AS can_insert,
+         has_table_privilege('anon', 'shared.keepalive_heartbeat', 'UPDATE')  AS can_update;
+  ```
+  All three must be `true`.
+- **Keepalive run fails with `42501 new row violates row-level security
+  policy`** — RLS got re-enabled on `shared.keepalive_heartbeat`. This table is
+  meant to run without it (Step 8.1). Note that a permissive
+  `WITH CHECK (true)` policy did **not** make inserts work here — the failure
+  reproduced in the SQL editor under `SET LOCAL ROLE anon` with grants
+  confirmed and the policy in place, and was never root-caused. Re-disable it:
+  ```sql
+  ALTER TABLE shared.keepalive_heartbeat DISABLE ROW LEVEL SECURITY;
+  ```
+  Do not generalise that workaround to any table holding user data.

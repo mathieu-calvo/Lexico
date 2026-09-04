@@ -136,18 +136,27 @@ CREATE TABLE IF NOT EXISTS shared.keepalive_heartbeat (
     pinged_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE shared.keepalive_heartbeat ENABLE ROW LEVEL SECURITY;
+-- Access control here is the GRANT, not RLS. `anon` gets INSERT + UPDATE on
+-- this one table (an upsert with `Prefer: resolution=merge-duplicates` uses
+-- both paths) and nothing else. RLS is deliberately DISABLED: the row is
+-- `(1, <timestamp>)` with no user data, so the only policy that would make
+-- sense is `WITH CHECK (true)` — identical in effect to no RLS at all.
+--
+-- History: policies were tried first, and inserts as `anon` failed with
+-- "new row violates row-level security policy" even with a permissive
+-- `WITH CHECK (true)` policy in place and `has_table_privilege` returning
+-- true — reproducible straight from the SQL editor under `SET LOCAL ROLE
+-- anon`, so not a PostgREST or API-key problem. Root cause never identified.
+-- Disabling RLS on this table was the deliberate trade-off; it costs a
+-- standing "RLS disabled on a public-facing table" entry in Supabase's
+-- security advisor. Do NOT copy this pattern to `shared.app_events`,
+-- `iip.hands`, or any table holding user data — there RLS does real work.
+ALTER TABLE shared.keepalive_heartbeat DISABLE ROW LEVEL SECURITY;
 
--- The workflow authenticates with the anon key, so anon needs INSERT + UPDATE
--- (an upsert with `Prefer: resolution=merge-duplicates` uses both paths).
--- The table holds no user data, so this grants nothing sensitive.
+-- Clean up the policies from that earlier attempt if they are still around;
+-- they are inert while RLS is disabled, but leaving them invites confusion.
 DROP POLICY IF EXISTS "keepalive insert from ci" ON shared.keepalive_heartbeat;
-CREATE POLICY "keepalive insert from ci"
-    ON shared.keepalive_heartbeat FOR INSERT TO anon WITH CHECK (true);
-
 DROP POLICY IF EXISTS "keepalive update from ci" ON shared.keepalive_heartbeat;
-CREATE POLICY "keepalive update from ci"
-    ON shared.keepalive_heartbeat FOR UPDATE TO anon USING (true) WITH CHECK (true);
 
 GRANT USAGE ON SCHEMA shared TO anon;
-GRANT INSERT, UPDATE ON shared.keepalive_heartbeat TO anon;
+GRANT SELECT, INSERT, UPDATE ON shared.keepalive_heartbeat TO anon;
