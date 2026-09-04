@@ -180,6 +180,8 @@ Push to GitHub, connect the repo on [share.streamlit.io](https://share.streamlit
 
 Lexico's Supabase project is **shared** with other hobby apps (Incomplete-Info-Problem, future ones) under a schema-per-app layout — `lexico.*` for content, `shared.app_events` for cross-app traffic. One Supabase free-tier project hosts every small app except Portfolio-Simulator (which stays separate). See [`docs/deployment-guide.md`](docs/deployment-guide.md) for the one-time shared-project setup.
 
+A daily GitHub Actions cron ([`.github/workflows/supabase-keepalive.yml`](.github/workflows/supabase-keepalive.yml)) writes a heartbeat row through the Supabase REST API so the free tier never auto-pauses the project after 7 days of inactivity. It covers every app on the shared project, so only this repo needs it.
+
 ---
 
 ## License

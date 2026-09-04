@@ -1,0 +1,58 @@
+name: Supabase keepalive
+
+on:
+  schedule:
+    # Daily at 08:17 UTC. Daily (not weekly) so a single GitHub-skipped
+    # scheduled run leaves a ~2-day gap, well under Supabase's 7-day pause
+    # threshold. Off-the-hour minute because :00 slots are the most delayed.
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+# This pings the SHARED `hobby-apps` Supabase project, so it keeps Lexico
+# AND Incomplete-Info-Problem (and any future app on that project) awake.
+# Only one repo needs this workflow; Lexico owns it.
+# Portfolio-Simulator is on its own Supabase project with its own copy.
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      # Secondary canary: proves the pooler connection string still works.
+      # Soft-skips when the secret is absent — the REST write below is the
+      # step that actually keeps the project alive.
+      - name: Run SELECT 1 against Supabase
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "DATABASE_URL secret not set — skipping the psql canary."
+            exit 0
+          fi
+          psql "$DATABASE_URL" -c "SELECT 1;"
+
+      # Supabase's auto-pause detector watches the API surface (PostgREST etc.),
+      # not raw Postgres connections, and a read-only GET does not count as
+      # activity (confirmed on the Portfolio-Simulator project: it paused in
+      # Jul 2026 despite green GET pings). A WRITE through PostgREST generates
+      # WAL activity the detector registers.
+      #
+      # `Content-Profile: shared` targets the `shared` schema — the project
+      # must list `shared` under Project Settings -> API -> Exposed schemas
+      # (it already does for `shared.app_events`).
+      - name: Upsert heartbeat via Supabase REST (write = real activity)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "SUPABASE_URL or SUPABASE_ANON_KEY secret is not set" >&2
+            exit 1
+          fi
+          curl -fsS -X POST \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Content-Profile: shared" \
+            -H "Prefer: resolution=merge-duplicates,return=minimal" \
+            "$SUPABASE_URL/rest/v1/keepalive_heartbeat" \
+            -d "{\"id\":1,\"pinged_at\":\"$(date -u +%FT%TZ)\"}"

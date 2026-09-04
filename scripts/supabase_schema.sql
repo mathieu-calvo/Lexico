@@ -116,3 +116,38 @@ CREATE INDEX IF NOT EXISTS idx_app_events_app_user_time
 -- here. IIP writes via the anon key through PostgREST, so its schema SQL
 -- (scripts/supabase_schema.sql in that repo) adds the RLS policies for
 -- `shared.app_events`. Running both files is idempotent.
+
+-- ---------------------------------------------------------------------------
+-- shared.keepalive_heartbeat — anti-auto-pause target
+--
+-- The Supabase free tier pauses a project after 7 days of inactivity, and the
+-- detector watches the API surface (PostgREST), not raw Postgres connections.
+-- A read-only GET does not count either. So a GitHub Actions cron
+-- (.github/workflows/supabase-keepalive.yml in this repo) upserts this single
+-- row daily via PostgREST — a WRITE, which generates the WAL activity the
+-- detector actually registers.
+--
+-- Lives in `shared` because it protects the whole project, not just Lexico:
+-- one workflow in one repo keeps every app on `hobby-apps` awake.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS shared.keepalive_heartbeat (
+    id         SMALLINT PRIMARY KEY,
+    pinged_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE shared.keepalive_heartbeat ENABLE ROW LEVEL SECURITY;
+
+-- The workflow authenticates with the anon key, so anon needs INSERT + UPDATE
+-- (an upsert with `Prefer: resolution=merge-duplicates` uses both paths).
+-- The table holds no user data, so this grants nothing sensitive.
+DROP POLICY IF EXISTS "keepalive insert from ci" ON shared.keepalive_heartbeat;
+CREATE POLICY "keepalive insert from ci"
+    ON shared.keepalive_heartbeat FOR INSERT TO anon WITH CHECK (true);
+
+DROP POLICY IF EXISTS "keepalive update from ci" ON shared.keepalive_heartbeat;
+CREATE POLICY "keepalive update from ci"
+    ON shared.keepalive_heartbeat FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+GRANT USAGE ON SCHEMA shared TO anon;
+GRANT INSERT, UPDATE ON shared.keepalive_heartbeat TO anon;

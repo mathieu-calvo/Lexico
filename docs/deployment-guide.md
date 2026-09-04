@@ -247,6 +247,62 @@ expiry_days = 30
 
 ---
 
+## Step 8: Keep the Supabase project awake
+
+The Supabase free tier **pauses a project after 7 days of inactivity**, and a
+paused project means every app on it falls back to errors until you restore it
+by hand from the dashboard. A GitHub Actions cron in this repo,
+[`.github/workflows/supabase-keepalive.yml`](../.github/workflows/supabase-keepalive.yml),
+prevents that: it runs daily at 08:17 UTC and upserts a single row into
+`shared.keepalive_heartbeat`.
+
+> **Why a write, not a ping?** Supabase's auto-pause detector watches the API
+> surface (PostgREST), not raw Postgres connections — and a read-only `GET`
+> doesn't count as activity either. This was confirmed the hard way on the
+> Portfolio-Simulator project, which paused despite a green scheduled `GET`
+> ping every day. Only a **write** generates the WAL activity the detector
+> registers, hence the upsert.
+
+Because the workflow targets the shared project, **one copy is enough for
+every app on it** — Lexico owns it, and Incomplete-Info-Problem is kept awake
+for free. (Portfolio-Simulator is on a separate Supabase project and has its
+own copy of this workflow.)
+
+### One-time setup
+
+1. Run [`scripts/supabase_schema.sql`](../scripts/supabase_schema.sql) if you
+   haven't since this was added — it creates `shared.keepalive_heartbeat` plus
+   the RLS policies letting the anon key insert/update that one row. The table
+   holds no user data, so this grants nothing sensitive.
+2. Confirm `shared` is listed under **Project Settings → API → Exposed
+   schemas** (it already is if IIP's traffic logging works). PostgREST only
+   sees schemas on that list.
+3. Supabase → **Project Settings → API** and copy the **Project URL** and the
+   **anon public** key.
+4. GitHub → the Lexico repo → **Settings → Secrets and variables → Actions →
+   New repository secret**, and add:
+
+   | Secret | Value | Required |
+   |---|---|---|
+   | `SUPABASE_URL` | `https://<project-ref>.supabase.co` (no trailing slash) | yes |
+   | `SUPABASE_ANON_KEY` | the **anon public** key — never the service-role key | yes |
+   | `DATABASE_URL` | the Session pooler string from Step 4 | optional |
+
+   `DATABASE_URL` only powers a `SELECT 1` canary that proves the pooler
+   connection string still works; the step soft-skips when it's absent.
+
+5. GitHub → **Actions** tab → **Supabase keepalive** → **Run workflow** to
+   fire it once by hand, then check the run is green and that
+   `shared.keepalive_heartbeat` has a fresh `pinged_at` in the Supabase table
+   editor (switch the schema selector to `shared`).
+
+> **Watch out:** GitHub **disables scheduled workflows on a repo with no
+> activity for 60 days**, and emails you when it does. If Lexico goes quiet
+> for two months, re-enable the workflow from the Actions tab — otherwise the
+> keepalive silently stops and the project pauses a week later.
+
+---
+
 ## Managing users
 
 ### Adding a new user
@@ -433,3 +489,14 @@ levers if `lexico` ever dominates:
   is 50 calls/user/day.
 - **Data seems to disappear between sessions** — you're on ephemeral SQLite
   (no `[database] url` in secrets). Complete Steps 2–4 to persist.
+- **Everything errors at once and Supabase says "Project paused"** — the
+  keepalive stopped running. Restore the project from the Supabase dashboard,
+  then check the **Actions** tab: GitHub disables scheduled workflows after 60
+  days of repo inactivity (Step 8).
+- **Keepalive run fails with `relation "keepalive_heartbeat" does not exist`**
+  — either `scripts/supabase_schema.sql` hasn't been re-run since the table was
+  added, or `shared` is missing from **Project Settings → API → Exposed
+  schemas**.
+- **Keepalive run fails with `new row violates row-level security policy`** —
+  the `SUPABASE_ANON_KEY` secret is wrong, or the RLS policies at the bottom of
+  `scripts/supabase_schema.sql` were never applied.
