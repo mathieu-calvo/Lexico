@@ -48,9 +48,23 @@ jobs:
             echo "SUPABASE_URL or SUPABASE_ANON_KEY secret is not set" >&2
             exit 1
           fi
-          curl -fsS -X POST \
+
+          # The secret holds EITHER the new publishable key (`sb_publishable_…`)
+          # or the legacy anon key (a JWT, starts with `eyJ`). Both authenticate
+          # as the `anon` Postgres role via the `apikey` header, which is all
+          # PostgREST needs. Only the legacy key may also be sent as a bearer
+          # token — a publishable key in `Authorization` is not a JWT and gets
+          # rejected with 401 before RLS is ever consulted.
+          AUTH_HEADER=()
+          case "$SUPABASE_ANON_KEY" in
+            eyJ*) AUTH_HEADER=(-H "Authorization: Bearer $SUPABASE_ANON_KEY") ;;
+          esac
+
+          # --fail-with-body so a PostgREST error message reaches the log
+          # instead of a bare "curl: (22) ... error: 401".
+          curl -sS --fail-with-body -X POST \
             -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            "${AUTH_HEADER[@]}" \
             -H "Content-Type: application/json" \
             -H "Content-Profile: shared" \
             -H "Prefer: resolution=merge-duplicates,return=minimal" \

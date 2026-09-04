@@ -274,22 +274,35 @@ own copy of this workflow.)
    haven't since this was added — it creates `shared.keepalive_heartbeat` plus
    the RLS policies letting the anon key insert/update that one row. The table
    holds no user data, so this grants nothing sensitive.
-2. Confirm `shared` is listed under **Project Settings → API → Exposed
+2. Confirm `shared` is listed under **Project Settings → Data API → Exposed
    schemas** (it already is if IIP's traffic logging works). PostgREST only
-   sees schemas on that list.
-3. Supabase → **Project Settings → API** and copy the **Project URL** and the
-   **anon public** key.
+   sees schemas on that list. The dashboard used to call this page "API"; it
+   is now split into **Data API** (project URL, exposed schemas) and **API
+   Keys**, both under Project Settings.
+3. Copy the **Project URL** from **Project Settings → Data API**, and a
+   client key from **Project Settings → API Keys**: either the **publishable**
+   key (`sb_publishable_…`, the current format) or the legacy **anon public**
+   key. Both authenticate as the `anon` role, which is what the RLS policies
+   above are written against. Never the `sb_secret_…` / service-role key —
+   it bypasses RLS.
 4. GitHub → the Lexico repo → **Settings → Secrets and variables → Actions →
    New repository secret**, and add:
 
    | Secret | Value | Required |
    |---|---|---|
    | `SUPABASE_URL` | `https://<project-ref>.supabase.co` (no trailing slash) | yes |
-   | `SUPABASE_ANON_KEY` | the **anon public** key — never the service-role key | yes |
+   | `SUPABASE_ANON_KEY` | the **publishable** (or legacy **anon**) key — never a secret / service-role key | yes |
    | `DATABASE_URL` | the Session pooler string from Step 4 | optional |
 
    `DATABASE_URL` only powers a `SELECT 1` canary that proves the pooler
    connection string still works; the step soft-skips when it's absent.
+
+   > The secret keeps the name `SUPABASE_ANON_KEY` whichever key format you
+   > paste — it is just the env var the workflow reads. The workflow sniffs
+   > the value: a legacy JWT key (`eyJ…`) is sent as both `apikey` and
+   > `Authorization: Bearer`, while a publishable key is sent as `apikey`
+   > only, because it is not a JWT and PostgREST answers **401** to a
+   > non-JWT bearer token.
 
 5. GitHub → **Actions** tab → **Supabase keepalive** → **Run workflow** to
    fire it once by hand, then check the run is green and that
@@ -500,3 +513,7 @@ levers if `lexico` ever dominates:
 - **Keepalive run fails with `new row violates row-level security policy`** —
   the `SUPABASE_ANON_KEY` secret is wrong, or the RLS policies at the bottom of
   `scripts/supabase_schema.sql` were never applied.
+- **Keepalive run fails with `401 Unauthorized`** — the key is being sent as a
+  bearer token but isn't a JWT (the `sb_publishable_…` format), or the secret
+  is truncated. The workflow handles the format split itself, so re-copy the
+  key with the dashboard's copy button and re-run.
