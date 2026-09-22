@@ -271,18 +271,17 @@ own copy of this workflow.)
 ### One-time setup
 
 1. Run [`scripts/supabase_schema.sql`](../scripts/supabase_schema.sql) if you
-   haven't since this was added — it creates `shared.keepalive_heartbeat` and
-   grants `anon` INSERT/UPDATE on that one table. Select nothing in the editor
+  haven't since this was added — it creates `shared.keepalive_heartbeat`,
+  enables RLS, and grants `anon` only the INSERT/UPDATE access needed for the
+  heartbeat upsert. Select nothing in the editor
    before hitting **Run**: the Supabase SQL editor executes only the
    highlighted text when there is a selection, and a partially-applied block
    reports the same "Success. No rows returned." as a complete one.
 
-   > **This table alone runs with RLS disabled** — deliberately. It holds
-   > `(1, <timestamp>)` and no user data, the `GRANT` is what limits access,
-   > and the only policy that would make sense (`WITH CHECK (true)`) is
-   > equivalent to no RLS. Expect a standing "RLS disabled on a public-facing
-   > table" entry in Supabase's **Security Advisor** for it; every *other*
-   > table on this project keeps RLS enabled and doing real work.
+    > The table holds only `(1, <timestamp>)`, but it still has RLS enabled.
+    > Anonymous clients can upsert that one heartbeat row; they cannot read or
+    > delete it. This keeps the keepalive workflow working without leaving a
+    > public-facing table with RLS disabled.
 2. Confirm `shared` is listed under **Project Settings → Data API → Exposed
    schemas** (it already is if IIP's traffic logging works). PostgREST only
    sees schemas on that list. The dashboard used to call this page "API"; it
@@ -535,12 +534,7 @@ levers if `lexico` ever dominates:
   ```
   All three must be `true`.
 - **Keepalive run fails with `42501 new row violates row-level security
-  policy`** — RLS got re-enabled on `shared.keepalive_heartbeat`. This table is
-  meant to run without it (Step 8.1). Note that a permissive
-  `WITH CHECK (true)` policy did **not** make inserts work here — the failure
-  reproduced in the SQL editor under `SET LOCAL ROLE anon` with grants
-  confirmed and the policy in place, and was never root-caused. Re-disable it:
-  ```sql
-  ALTER TABLE shared.keepalive_heartbeat DISABLE ROW LEVEL SECURITY;
-  ```
-  Do not generalise that workaround to any table holding user data.
+  policy`** — the schema migration was only partially applied. Re-run the
+  entire `scripts/supabase_schema.sql` file with no text selected, then verify
+  that the `keepalive anon insert` and `keepalive anon update` policies exist.
+  Do not disable RLS as a workaround.

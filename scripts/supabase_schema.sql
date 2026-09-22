@@ -136,27 +136,29 @@ CREATE TABLE IF NOT EXISTS shared.keepalive_heartbeat (
     pinged_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Access control here is the GRANT, not RLS. `anon` gets INSERT + UPDATE on
--- this one table (an upsert with `Prefer: resolution=merge-duplicates` uses
--- both paths) and nothing else. RLS is deliberately DISABLED: the row is
--- `(1, <timestamp>)` with no user data, so the only policy that would make
--- sense is `WITH CHECK (true)` — identical in effect to no RLS at all.
---
--- History: policies were tried first, and inserts as `anon` failed with
--- "new row violates row-level security policy" even with a permissive
--- `WITH CHECK (true)` policy in place and `has_table_privilege` returning
--- true — reproducible straight from the SQL editor under `SET LOCAL ROLE
--- anon`, so not a PostgREST or API-key problem. Root cause never identified.
--- Disabling RLS on this table was the deliberate trade-off; it costs a
--- standing "RLS disabled on a public-facing table" entry in Supabase's
--- security advisor. Do NOT copy this pattern to `shared.app_events`,
--- `iip.hands`, or any table holding user data — there RLS does real work.
-ALTER TABLE shared.keepalive_heartbeat DISABLE ROW LEVEL SECURITY;
+-- The keepalive workflow uses the public `anon` role, so protect this table
+-- with RLS even though its single row contains no user data. The workflow
+-- needs only an upsert of id=1; anonymous reads and deletes are unnecessary.
+ALTER TABLE shared.keepalive_heartbeat ENABLE ROW LEVEL SECURITY;
 
--- Clean up the policies from that earlier attempt if they are still around;
--- they are inert while RLS is disabled, but leaving them invites confusion.
 DROP POLICY IF EXISTS "keepalive insert from ci" ON shared.keepalive_heartbeat;
 DROP POLICY IF EXISTS "keepalive update from ci" ON shared.keepalive_heartbeat;
+DROP POLICY IF EXISTS "keepalive anon insert" ON shared.keepalive_heartbeat;
+DROP POLICY IF EXISTS "keepalive anon update" ON shared.keepalive_heartbeat;
+
+CREATE POLICY "keepalive anon insert"
+    ON shared.keepalive_heartbeat
+    FOR INSERT
+    TO anon
+    WITH CHECK (id = 1);
+
+CREATE POLICY "keepalive anon update"
+    ON shared.keepalive_heartbeat
+    FOR UPDATE
+    TO anon
+    USING (id = 1)
+    WITH CHECK (id = 1);
 
 GRANT USAGE ON SCHEMA shared TO anon;
-GRANT SELECT, INSERT, UPDATE ON shared.keepalive_heartbeat TO anon;
+REVOKE SELECT, DELETE ON shared.keepalive_heartbeat FROM anon;
+GRANT INSERT, UPDATE ON shared.keepalive_heartbeat TO anon;
