@@ -16,6 +16,7 @@ Dialect deltas from the SQLite version:
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import threading
@@ -116,18 +117,54 @@ def _to_jsonb(obj) -> str:
     return json.dumps(obj, default=str)
 
 
+def _reconnecting(method):
+    """Run a store method, reconnecting and retrying once if the link died.
+
+    The store is a process-wide singleton holding one long-lived connection,
+    and Supabase's pooler drops idle clients. psycopg2 only notices on the
+    next query: that query raises ``OperationalError`` and marks the
+    connection closed, after which every call raises ``InterfaceError:
+    connection already closed`` until the app restarts. A dead connection
+    never committed the in-flight transaction, so re-running is safe.
+
+    Any other database error leaves the shared connection inside an aborted
+    transaction, so roll it back before re-raising.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            if not self._conn.closed:
+                self._rollback_quietly()
+                raise
+            logger.warning(
+                "PostgreSQL connection lost; reconnecting for %s", method.__name__
+            )
+            self._reconnect()
+            return method(self, *args, **kwargs)
+        except psycopg2.Error:
+            self._rollback_quietly()
+            raise
+
+    return wrapper
+
+
 class PgDeckStore:
     """Public API mirrors ``DeckStore`` — callers don't care which backend.
 
     Thread-safety: psycopg2 connections are not inherently thread-safe, so
     every read/write is serialized via ``self._lock``. Streamlit's rerun
-    model keeps contention low; we don't need a pool.
+    model keeps contention low; we don't need a pool. Public methods are
+    wrapped in ``_reconnecting`` so a connection dropped by the pooler is
+    replaced instead of breaking every later call.
     """
 
     def __init__(self, database_url: str) -> None:
-        url = _ensure_ssl(database_url)
+        self._url = _ensure_ssl(database_url)
         try:
-            self._conn = psycopg2.connect(url, connect_timeout=10)
+            self._conn = self._connect()
         except psycopg2.OperationalError as exc:
             raise RuntimeError(
                 f"Failed to connect to PostgreSQL: {exc}. "
@@ -135,9 +172,26 @@ class PgDeckStore:
                 "must contain 'pooler.supabase.com'. URL-encode any special "
                 "characters in the password."
             ) from exc
-        self._conn.autocommit = False
         self._lock = threading.Lock()
         self._bootstrap_schema()
+
+    def _connect(self):
+        conn = psycopg2.connect(self._url, connect_timeout=10)
+        conn.autocommit = False
+        return conn
+
+    def _reconnect(self) -> None:
+        with self._lock:
+            # Another thread may already have replaced the dead connection.
+            if self._conn.closed:
+                self._conn = self._connect()
+
+    def _rollback_quietly(self) -> None:
+        with self._lock:
+            try:
+                self._conn.rollback()
+            except psycopg2.Error:
+                pass
 
     def _bootstrap_schema(self) -> None:
         with self._lock, self._conn.cursor() as cur:
@@ -147,6 +201,7 @@ class PgDeckStore:
 
     # ---------- decks ----------
 
+    @_reconnecting
     def create_deck(self, deck: Deck) -> Deck:
         with self._lock, self._conn.cursor() as cur:
             cur.execute(
@@ -167,6 +222,7 @@ class PgDeckStore:
             self._conn.commit()
         return deck.model_copy(update={"id": deck_id})
 
+    @_reconnecting
     def list_decks(self, user_id: str = "local") -> list[Deck]:
         with self._lock, self._conn.cursor() as cur:
             cur.execute(
@@ -187,11 +243,13 @@ class PgDeckStore:
             for row in rows
         ]
 
+    @_reconnecting
     def delete_deck(self, deck_id: int) -> None:
         with self._lock, self._conn.cursor() as cur:
             cur.execute("DELETE FROM decks WHERE id = %s", (deck_id,))
             self._conn.commit()
 
+    @_reconnecting
     def update_deck(
         self,
         deck_id: int,
@@ -218,6 +276,7 @@ class PgDeckStore:
 
     # ---------- cards ----------
 
+    @_reconnecting
     def add_card(self, card: Card) -> Card:
         if card.deck_id is None:
             raise ValueError("Card must have a deck_id before saving")
@@ -238,12 +297,14 @@ class PgDeckStore:
             self._conn.commit()
         return card.model_copy(update={"id": card_id})
 
+    @_reconnecting
     def delete_card(self, card_id: int) -> None:
         with self._lock, self._conn.cursor() as cur:
             cur.execute("DELETE FROM review_logs WHERE card_id = %s", (card_id,))
             cur.execute("DELETE FROM cards WHERE id = %s", (card_id,))
             self._conn.commit()
 
+    @_reconnecting
     def update_card_state(self, card_id: int, state: FSRSState) -> None:
         with self._lock, self._conn.cursor() as cur:
             cur.execute(
@@ -252,6 +313,7 @@ class PgDeckStore:
             )
             self._conn.commit()
 
+    @_reconnecting
     def card_exists(self, deck_id: int, lemma: str) -> bool:
         """True if a card with this lemma (case-insensitive) is already in the deck."""
         with self._lock, self._conn.cursor() as cur:
@@ -265,6 +327,7 @@ class PgDeckStore:
             row = cur.fetchone()
         return row is not None
 
+    @_reconnecting
     def list_cards(self, deck_id: int) -> list[Card]:
         with self._lock, self._conn.cursor() as cur:
             cur.execute(
@@ -275,6 +338,7 @@ class PgDeckStore:
             rows = cur.fetchall()
         return [self._row_to_card(row) for row in rows]
 
+    @_reconnecting
     def get_due_cards(
         self, user_id: str = "local", now: datetime | None = None, limit: int = 50
     ) -> list[Card]:
@@ -300,6 +364,7 @@ class PgDeckStore:
         cards = [self._row_to_card(row) for row in rows]
         return [c for c in cards if c.fsrs_state.due_at.isoformat() <= cutoff]
 
+    @_reconnecting
     def count_cards(self, user_id: str = "local") -> int:
         with self._lock, self._conn.cursor() as cur:
             cur.execute(
@@ -327,6 +392,7 @@ class PgDeckStore:
 
     # ---------- review logs ----------
 
+    @_reconnecting
     def log_review(
         self, log: ReviewLog, user_id: str = "local", language: Language = Language.FR
     ) -> None:
@@ -350,6 +416,7 @@ class PgDeckStore:
             )
             self._conn.commit()
 
+    @_reconnecting
     def list_review_logs(
         self, user_id: str = "local", limit: int = 1000
     ) -> list[dict]:
@@ -398,6 +465,7 @@ class PgDeckStore:
 
     # ---------- llm usage ----------
 
+    @_reconnecting
     def log_llm_usage(
         self,
         user_id: str,
@@ -424,6 +492,7 @@ class PgDeckStore:
             )
             self._conn.commit()
 
+    @_reconnecting
     def llm_calls_today(self, user_id: str | None = None) -> int:
         start, end = _today_utc_bounds()
         with self._lock, self._conn.cursor() as cur:
@@ -442,6 +511,7 @@ class PgDeckStore:
             row = cur.fetchone()
         return int(row[0])
 
+    @_reconnecting
     def llm_usd_today(self) -> float:
         start, end = _today_utc_bounds()
         with self._lock, self._conn.cursor() as cur:
@@ -455,6 +525,7 @@ class PgDeckStore:
 
     # ---------- liked quotes ----------
 
+    @_reconnecting
     def like_quote(
         self, user_id: str, language: Language, text: str, author: str
     ) -> None:
@@ -468,6 +539,7 @@ class PgDeckStore:
             )
             self._conn.commit()
 
+    @_reconnecting
     def unlike_quote(self, user_id: str, language: Language, text: str) -> None:
         with self._lock, self._conn.cursor() as cur:
             cur.execute(
@@ -477,6 +549,7 @@ class PgDeckStore:
             )
             self._conn.commit()
 
+    @_reconnecting
     def is_quote_liked(self, user_id: str, language: Language, text: str) -> bool:
         with self._lock, self._conn.cursor() as cur:
             cur.execute(
@@ -487,6 +560,7 @@ class PgDeckStore:
             row = cur.fetchone()
         return row is not None
 
+    @_reconnecting
     def list_liked_quotes(
         self, user_id: str = "local", language: Language | None = None
     ) -> list[dict]:
