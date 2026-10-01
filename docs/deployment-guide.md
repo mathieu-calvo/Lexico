@@ -279,8 +279,8 @@ own copy of this workflow.)
    reports the same "Success. No rows returned." as a complete one.
 
     > The table holds only `(1, <timestamp>)`, but it still has RLS enabled.
-    > Anonymous clients can upsert that one heartbeat row; they cannot read or
-    > delete it. This keeps the keepalive workflow working without leaving a
+    > Anonymous clients can upsert that one heartbeat row; they can read it
+    > (the upsert needs that under RLS) but cannot delete it. This keeps the keepalive workflow working without leaving a
     > public-facing table with RLS disabled.
 2. Confirm `shared` is listed under **Project Settings → Data API → Exposed
    schemas** (it already is if IIP's traffic logging works). PostgREST only
@@ -536,5 +536,6 @@ levers if `lexico` ever dominates:
 - **Keepalive run fails with `42501 new row violates row-level security
   policy`** — the schema migration was only partially applied. Re-run the
   entire `scripts/supabase_schema.sql` file with no text selected, then verify
-  that the `keepalive anon insert` and `keepalive anon update` policies exist.
+  that the `keepalive anon select`, `keepalive anon insert` and
+  `keepalive anon update` policies exist.
   Do not disable RLS as a workaround.

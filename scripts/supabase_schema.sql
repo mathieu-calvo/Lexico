@@ -138,13 +138,27 @@ CREATE TABLE IF NOT EXISTS shared.keepalive_heartbeat (
 
 -- The keepalive workflow uses the public `anon` role, so protect this table
 -- with RLS even though its single row contains no user data. The workflow
--- needs only an upsert of id=1; anonymous reads and deletes are unnecessary.
+-- upserts id=1 and never deletes.
+--
+-- The upsert is INSERT ... ON CONFLICT DO UPDATE, which under RLS also checks
+-- the existing row against SELECT policies, and needs SELECT on the conflict
+-- column. Without the SELECT grant + policy below it fails with "new row
+-- violates row-level security policy" even though the INSERT/UPDATE policies
+-- pass. That missing SELECT policy is why an earlier attempt failed. Reading
+-- the heartbeat timestamp exposes nothing.
 ALTER TABLE shared.keepalive_heartbeat ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "keepalive insert from ci" ON shared.keepalive_heartbeat;
 DROP POLICY IF EXISTS "keepalive update from ci" ON shared.keepalive_heartbeat;
 DROP POLICY IF EXISTS "keepalive anon insert" ON shared.keepalive_heartbeat;
 DROP POLICY IF EXISTS "keepalive anon update" ON shared.keepalive_heartbeat;
+DROP POLICY IF EXISTS "keepalive anon select" ON shared.keepalive_heartbeat;
+
+CREATE POLICY "keepalive anon select"
+    ON shared.keepalive_heartbeat
+    FOR SELECT
+    TO anon
+    USING (id = 1);
 
 CREATE POLICY "keepalive anon insert"
     ON shared.keepalive_heartbeat
@@ -160,5 +174,5 @@ CREATE POLICY "keepalive anon update"
     WITH CHECK (id = 1);
 
 GRANT USAGE ON SCHEMA shared TO anon;
-REVOKE SELECT, DELETE ON shared.keepalive_heartbeat FROM anon;
-GRANT INSERT, UPDATE ON shared.keepalive_heartbeat TO anon;
+REVOKE DELETE ON shared.keepalive_heartbeat FROM anon;
+GRANT SELECT, INSERT, UPDATE ON shared.keepalive_heartbeat TO anon;
